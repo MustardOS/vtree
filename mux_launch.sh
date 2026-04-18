@@ -5,6 +5,8 @@
 
 . /opt/muos/script/var/func.sh
 
+SETUP_STAGE_OVERLAY
+
 APP_BIN="vtree"
 SETUP_APP "$APP_BIN" ""
 

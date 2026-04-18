@@ -16,7 +16,7 @@
 // ---------------------------------------------------------------------------
 // Version
 // ---------------------------------------------------------------------------
-#define VTREE_VERSION "0.8"
+#define VTREE_VERSION "0.9"
 
 // ---------------------------------------------------------------------------
 // Globals
@@ -68,7 +68,7 @@ Uint32     glyph_frame = 0;
 #define TOPMENU_ABOUT    2
 #define TOPMENU_EXIT     3
 #define TOPMENU_MAX      4
-static const char *topmenu_items[TOPMENU_MAX] = { "Files", "Settings", "About", "Exit" };
+static const char *topmenu_items[TOPMENU_MAX] = { "Menu_Files", "Menu_Settings", "Menu_About", "Menu_Exit" };
 
 // File-ops submenu
 #define FILEMENU_COPY    0
@@ -82,7 +82,8 @@ static const char *topmenu_items[TOPMENU_MAX] = { "Files", "Settings", "About", 
 #define FILEMENU_BACK    8
 #define FILEMENU_MAX     9
 static const char *filemenu_items[FILEMENU_MAX] = {
-    "Copy", "Cut", "Paste", "Symlink", "Rename", "Delete", "New File", "New Folder", "Back"
+    "FileOp_Copy", "FileOp_Cut", "FileOp_Paste", "FileOp_Symlink",
+    "FileOp_Rename", "FileOp_Delete", "FileOp_NewFile", "FileOp_NewFolder", "FileOp_Back"
 };
 
 SDL_Window        *window   = NULL;
@@ -257,7 +258,7 @@ static SDL_Texture *get_file_icon(const FileEntry *fe) {
 #define ACT_INFO    3
 #define ACT_CANCEL  4
 #define ACT_EXEC    5
-static const char *act_labels[] = { "Text Viewer", "Hex Viewer", "Image Viewer", "File Info", "Cancel", "Execute" };
+static const char *act_labels[] = { "ActionChooser_Text", "ActionChooser_Hex", "ActionChooser_Image", "ActionChooser_Info", "ActionChooser_Cancel", "ActionChooser_Execute" };
 
 static int  choose_actions[8];   // action IDs for current menu
 static int  choose_count    = 0;
@@ -324,7 +325,7 @@ static void show_fileinfo(const char *path) {
     fileinfo_line_count = 0;
     struct stat lst, st;
     if (lstat(path, &lst) != 0) {
-        snprintf(fileinfo_lines[fileinfo_line_count++], 256, "Cannot stat file");
+        snprintf(fileinfo_lines[fileinfo_line_count++], 256, "%s", tr("FileInfo_CannotStat"));
         fileinfo_active = true;
         return;
     }
@@ -335,24 +336,24 @@ static void show_fileinfo(const char *path) {
 
     // Name
     const char *base = strrchr(path, '/');
-    snprintf(fileinfo_lines[fileinfo_line_count++], 256, "Name: %s", base ? base + 1 : path);
+    snprintf(fileinfo_lines[fileinfo_line_count++], 256, tr("FileInfo_Name"), base ? base + 1 : path);
 
     // Size — for directories walk recursively, otherwise use stat size
     char sz[32];
     bool item_is_dir = S_ISDIR(info->st_mode);
     long long item_size = item_is_dir ? calc_dir_size(path) : (long long)info->st_size;
     format_size(item_size, sz);
-    snprintf(fileinfo_lines[fileinfo_line_count++], 256, "Size: %s (%lld bytes)", sz, item_size);
+    snprintf(fileinfo_lines[fileinfo_line_count++], 256, tr("FileInfo_Size"), sz, item_size);
 
     // Type
-    const char *ftype = is_link ? (target_ok ? (S_ISDIR(info->st_mode) ? "Symlink -> Dir" : "Symlink -> File") : "Symlink (broken)") :
-                        S_ISDIR(lst.st_mode) ? "Directory" : "Regular File";
-    snprintf(fileinfo_lines[fileinfo_line_count++], 256, "Type: %s", ftype);
+    const char *ftype = is_link ? (target_ok ? (S_ISDIR(info->st_mode) ? tr("FileInfo_TypeSymlinkDir") : tr("FileInfo_TypeSymlinkFile")) : tr("FileInfo_TypeSymlinkBroken")) :
+                        S_ISDIR(lst.st_mode) ? tr("FileInfo_TypeDirectory") : tr("FileInfo_TypeRegular");
+    snprintf(fileinfo_lines[fileinfo_line_count++], 256, tr("FileInfo_Type"), ftype);
 
     // Permissions
     char perms[12];
     format_perms(lst.st_mode, perms);
-    snprintf(fileinfo_lines[fileinfo_line_count++], 256, "Perms: %s  (octal %04o)", perms, (unsigned)(lst.st_mode & 07777));
+    snprintf(fileinfo_lines[fileinfo_line_count++], 256, tr("FileInfo_Perms"), perms, (unsigned)(lst.st_mode & 07777));
 
     // Owner / group
     char owner[64] = "", group[64] = "";
@@ -362,19 +363,19 @@ static void show_fileinfo(const char *path) {
     else    snprintf(owner, sizeof(owner), "%u", lst.st_uid);
     if (gr) snprintf(group, sizeof(group), "%s", gr->gr_name);
     else    snprintf(group, sizeof(group), "%u", lst.st_gid);
-    snprintf(fileinfo_lines[fileinfo_line_count++], 256, "Owner: %s / %s", owner, group);
+    snprintf(fileinfo_lines[fileinfo_line_count++], 256, tr("FileInfo_Owner"), owner, group);
 
     // Modified time
     char tbuf[64];
     struct tm *tm = localtime(&lst.st_mtime);
     strftime(tbuf, sizeof(tbuf), "%Y-%m-%d  %H:%M:%S", tm);
-    snprintf(fileinfo_lines[fileinfo_line_count++], 256, "Modified: %s", tbuf);
+    snprintf(fileinfo_lines[fileinfo_line_count++], 256, tr("FileInfo_Modified"), tbuf);
 
     // Symlink target
     if (is_link) {
         char target[MAX_PATH] = "";
         ssize_t n = readlink(path, target, MAX_PATH - 1);
-        if (n > 0) { target[n] = '\0'; snprintf(fileinfo_lines[fileinfo_line_count++], 256, "Target: %s", target); }
+        if (n > 0) { target[n] = '\0'; snprintf(fileinfo_lines[fileinfo_line_count++], 256, tr("FileInfo_Target"), target); }
     }
 
     fileinfo_is_multi = false;
@@ -398,22 +399,22 @@ static void show_fileinfo_multi(void) {
         total_size += s->files[i].is_dir ? calc_dir_size(fp) : s->files[i].size;
     }
 
-    snprintf(fileinfo_lines[fileinfo_line_count++], 256, "%d item%s selected",
+    snprintf(fileinfo_lines[fileinfo_line_count++], 256, tr("FileInfo_ItemsSelected"),
              total, total == 1 ? "" : "s");
 
     if (ndirs > 0 && nfiles > 0)
-        snprintf(fileinfo_lines[fileinfo_line_count++], 256, "Files: %d   Directories: %d", nfiles, ndirs);
+        snprintf(fileinfo_lines[fileinfo_line_count++], 256, tr("FileInfo_FilesDirs"), nfiles, ndirs);
     else if (ndirs > 0)
-        snprintf(fileinfo_lines[fileinfo_line_count++], 256, "Directories: %d", ndirs);
+        snprintf(fileinfo_lines[fileinfo_line_count++], 256, tr("FileInfo_Dirs"), ndirs);
     else
-        snprintf(fileinfo_lines[fileinfo_line_count++], 256, "Files: %d", nfiles);
+        snprintf(fileinfo_lines[fileinfo_line_count++], 256, tr("FileInfo_Files"), nfiles);
 
     if (nlinks > 0)
-        snprintf(fileinfo_lines[fileinfo_line_count++], 256, "Symlinks: %d", nlinks);
+        snprintf(fileinfo_lines[fileinfo_line_count++], 256, tr("FileInfo_Symlinks"), nlinks);
 
     char sz[32];
     format_size(total_size, sz);
-    snprintf(fileinfo_lines[fileinfo_line_count++], 256, "Total size: %s", sz);
+    snprintf(fileinfo_lines[fileinfo_line_count++], 256, tr("FileInfo_TotalSize"), sz);
 
     fileinfo_is_multi = true;
     fileinfo_is_dir   = (ndirs > 0 && nfiles == 0 && nlinks == 0);
@@ -424,7 +425,7 @@ static void show_fileinfo_multi(void) {
 // Settings page — tabbed layout
 // ---------------------------------------------------------------------------
 typedef enum { STYPE_PRESET, STYPE_FONT, STYPE_INT, STYPE_ACTION,
-               STYPE_BOOL, STYPE_KEYBIND, STYPE_PATH, STYPE_CYCLE } SettingType;
+               STYPE_BOOL, STYPE_KEYBIND, STYPE_PATH, STYPE_CYCLE, STYPE_LANG } SettingType;
 typedef struct {
     const char *label;
     SettingType type;
@@ -437,34 +438,35 @@ typedef struct {
 } SettingDef;
 
 #define SETTINGS_TAB_COUNT 3
-static const char *settings_tab_labels[SETTINGS_TAB_COUNT] = { "General", "Display", "Keys" };
+static const char *settings_tab_labels[SETTINGS_TAB_COUNT] = { "Settings_TabGeneral", "Settings_TabDisplay", "Settings_TabKeys" };
 static int settings_tab         = 0;
 static int settings_tab_indices[SETTINGS_TAB_COUNT] = { 0, 0, 0 };
 
-static const char *rotation_opts[] = { "None", "90 CW", "180", "270 CW" };
+static const char *rotation_opts[] = { "Settings_RotNone", "Settings_Rot90", "Settings_Rot180", "Settings_Rot270" };
 static SettingDef general_defs[] = {
-    { "Show Hidden Files",    STYPE_BOOL,  NULL, &cfg.show_hidden,   NULL, NULL,           0, 0, 0, NULL },
-    { "Remember Directories", STYPE_BOOL,  NULL, &cfg.remember_dirs, NULL, NULL,           0, 0, 0, NULL },
-    { "Execute Scripts",      STYPE_BOOL,  NULL, &cfg.exec_scripts,  NULL, NULL,           0, 0, 0, NULL },
-    { "Single Pane Mode",     STYPE_BOOL,  NULL, &cfg.single_pane,   NULL, NULL,           0, 0, 0, NULL },
-    { "Rotation",             STYPE_CYCLE, &cfg.rotation, NULL, NULL, NULL,                0, 0, 4, rotation_opts },
-    { "Start Dir: Left",      STYPE_PATH,  NULL, NULL, NULL, cfg.start_left,               0, 0, 0, NULL },
-    { "Start Dir: Right",     STYPE_PATH,  NULL, NULL, NULL, cfg.start_right,              0, 0, 0, NULL },
-    { "Save Config",          STYPE_ACTION,NULL, NULL, NULL, NULL,                         0, 0, 0, NULL },
-    { "Close",                STYPE_ACTION,NULL, NULL, NULL, NULL,                         0, 0, 0, NULL },
+    { "Settings_Language",     STYPE_LANG,  NULL, NULL, NULL, NULL,                         0, 0, 0, NULL },
+    { "Settings_ShowHidden",   STYPE_BOOL,  NULL, &cfg.show_hidden,   NULL, NULL,           0, 0, 0, NULL },
+    { "Settings_RememberDirs", STYPE_BOOL,  NULL, &cfg.remember_dirs, NULL, NULL,           0, 0, 0, NULL },
+    { "Settings_SinglePane",   STYPE_BOOL,  NULL, &cfg.single_pane,   NULL, NULL,           0, 0, 0, NULL },
+    { "Settings_StartLeft",    STYPE_PATH,  NULL, NULL, NULL, cfg.start_left,               0, 0, 0, NULL },
+    { "Settings_StartRight",   STYPE_PATH,  NULL, NULL, NULL, cfg.start_right,              0, 0, 0, NULL },
+    { "Settings_ExecScripts",  STYPE_BOOL,  NULL, &cfg.exec_scripts,  NULL, NULL,           0, 0, 0, NULL },
+    { "Settings_SaveConfig",   STYPE_ACTION,NULL, NULL, NULL, NULL,                         0, 0, 0, NULL },
+    { "Settings_Close",        STYPE_ACTION,NULL, NULL, NULL, NULL,                         0, 0, 0, NULL },
 };
 static SettingDef display_defs[] = {
-    { "Theme Preset",              STYPE_PRESET, NULL,                  NULL, NULL, NULL, 0, 0,    0    },
-    { "Icons Follow Theme Colours",STYPE_BOOL,   NULL, &cfg.tint_icons,  NULL, NULL, 0, 0,    0    },
-    { "Font File",                 STYPE_FONT,   NULL,                  NULL, NULL, NULL, 0, 0,    0   },
-    { "Screen Width",  STYPE_INT,    &cfg.screen_w,         NULL, NULL, NULL, 16, 320,  1920 },
-    { "Screen Height", STYPE_INT,    &cfg.screen_h,         NULL, NULL, NULL, 16, 240,  1080 },
-    { "Font: List",    STYPE_INT,    &cfg.font_size_list,   NULL, NULL, NULL, 1,  8,    48   },
-    { "Font: Header",  STYPE_INT,    &cfg.font_size_header, NULL, NULL, NULL, 1,  8,    48   },
-    { "Font: Footer",  STYPE_INT,    &cfg.font_size_footer, NULL, NULL, NULL, 1,  8,    48   },
-    { "Font: Menu",    STYPE_INT,    &cfg.font_size_menu,   NULL, NULL, NULL, 1,  8,    48   },
-    { "Save Config",   STYPE_ACTION, NULL,                  NULL, NULL, NULL, 0,  0,    0    },
-    { "Close",         STYPE_ACTION, NULL,                  NULL, NULL, NULL, 0,  0,    0    },
+    { "Settings_Rotation",     STYPE_CYCLE,  &cfg.rotation,         NULL, NULL, NULL, 0, 0,    4, rotation_opts },
+    { "Settings_ScreenWidth",  STYPE_INT,    &cfg.screen_w,         NULL, NULL, NULL, 16, 320,  1920 },
+    { "Settings_ScreenHeight", STYPE_INT,    &cfg.screen_h,         NULL, NULL, NULL, 16, 240,  1080 },
+    { "Settings_ThemePreset",  STYPE_PRESET, NULL,                  NULL, NULL, NULL, 0, 0,    0    },
+    { "Settings_TintIcons",    STYPE_BOOL,   NULL, &cfg.tint_icons,  NULL, NULL, 0, 0,    0    },
+    { "Settings_FontFile",     STYPE_FONT,   NULL,                  NULL, NULL, NULL, 0, 0,    0   },
+    { "Settings_FontList",     STYPE_INT,    &cfg.font_size_list,   NULL, NULL, NULL, 1,  8,    48   },
+    { "Settings_FontHeader",   STYPE_INT,    &cfg.font_size_header, NULL, NULL, NULL, 1,  8,    48   },
+    { "Settings_FontFooter",   STYPE_INT,    &cfg.font_size_footer, NULL, NULL, NULL, 1,  8,    48   },
+    { "Settings_FontMenu",     STYPE_INT,    &cfg.font_size_menu,   NULL, NULL, NULL, 1,  8,    48   },
+    { "Settings_SaveConfig",   STYPE_ACTION, NULL,                  NULL, NULL, NULL, 0,  0,    0    },
+    { "Settings_Close",        STYPE_ACTION, NULL,                  NULL, NULL, NULL, 0,  0,    0    },
 };
 // Pending key bindings — edited in-session, only written to cfg on explicit Save.
 // Prevents live rebinding from locking the user out of settings mid-session.
@@ -531,20 +533,20 @@ static void pending_keys_to_cfg(void) {
 }
 
 static SettingDef keys_defs[] = {
-    { "Confirm",          STYPE_KEYBIND, NULL, NULL, &pending_keys.k_confirm,    NULL, 0, 0, 0 },
-    { "Back / Up Dir",    STYPE_KEYBIND, NULL, NULL, &pending_keys.k_back,       NULL, 0, 0, 0 },
-    { "Menu",             STYPE_KEYBIND, NULL, NULL, &pending_keys.k_menu,       NULL, 0, 0, 0 },
-    { "Mark File",        STYPE_KEYBIND, NULL, NULL, &pending_keys.k_mark,       NULL, 0, 0, 0 },
-    { "Page Up",          STYPE_KEYBIND, NULL, NULL, &pending_keys.k_pgup,       NULL, 0, 0, 0 },
-    { "Page Down",        STYPE_KEYBIND, NULL, NULL, &pending_keys.k_pgdn,       NULL, 0, 0, 0 },
-    { "OSK: Type Key",    STYPE_KEYBIND, NULL, NULL, &pending_keys.osk_k_type,   NULL, 0, 0, 0 },
-    { "OSK: Backspace",   STYPE_KEYBIND, NULL, NULL, &pending_keys.osk_k_bksp,   NULL, 0, 0, 0 },
-    { "OSK: Shift Layer", STYPE_KEYBIND, NULL, NULL, &pending_keys.osk_k_shift,  NULL, 0, 0, 0 },
-    { "OSK: Cancel",      STYPE_KEYBIND, NULL, NULL, &pending_keys.osk_k_cancel, NULL, 0, 0, 0 },
-    { "OSK: Toggle KB",   STYPE_KEYBIND, NULL, NULL, &pending_keys.osk_k_toggle, NULL, 0, 0, 0 },
-    { "OSK: Ins/Ovr",     STYPE_KEYBIND, NULL, NULL, &pending_keys.osk_k_ins,    NULL, 0, 0, 0 },
-    { "Save Config",      STYPE_ACTION,  NULL, NULL, NULL,                       NULL, 0, 0, 0 },
-    { "Close",            STYPE_ACTION,  NULL, NULL, NULL,                       NULL, 0, 0, 0 },
+    { "Settings_KeyConfirm", STYPE_KEYBIND, NULL, NULL, &pending_keys.k_confirm,    NULL, 0, 0, 0 },
+    { "Settings_KeyBack",    STYPE_KEYBIND, NULL, NULL, &pending_keys.k_back,       NULL, 0, 0, 0 },
+    { "Settings_KeyMenu",    STYPE_KEYBIND, NULL, NULL, &pending_keys.k_menu,       NULL, 0, 0, 0 },
+    { "Settings_KeyMark",    STYPE_KEYBIND, NULL, NULL, &pending_keys.k_mark,       NULL, 0, 0, 0 },
+    { "Settings_KeyPageUp",  STYPE_KEYBIND, NULL, NULL, &pending_keys.k_pgup,       NULL, 0, 0, 0 },
+    { "Settings_KeyPageDown",STYPE_KEYBIND, NULL, NULL, &pending_keys.k_pgdn,       NULL, 0, 0, 0 },
+    { "Settings_OskType",    STYPE_KEYBIND, NULL, NULL, &pending_keys.osk_k_type,   NULL, 0, 0, 0 },
+    { "Settings_OskBksp",    STYPE_KEYBIND, NULL, NULL, &pending_keys.osk_k_bksp,   NULL, 0, 0, 0 },
+    { "Settings_OskShift",   STYPE_KEYBIND, NULL, NULL, &pending_keys.osk_k_shift,  NULL, 0, 0, 0 },
+    { "Settings_OskCancel",  STYPE_KEYBIND, NULL, NULL, &pending_keys.osk_k_cancel, NULL, 0, 0, 0 },
+    { "Settings_OskToggle",  STYPE_KEYBIND, NULL, NULL, &pending_keys.osk_k_toggle, NULL, 0, 0, 0 },
+    { "Settings_OskInsOvr",  STYPE_KEYBIND, NULL, NULL, &pending_keys.osk_k_ins,    NULL, 0, 0, 0 },
+    { "Settings_SaveConfig", STYPE_ACTION,  NULL, NULL, NULL,                       NULL, 0, 0, 0 },
+    { "Settings_Close",      STYPE_ACTION,  NULL, NULL, NULL,                       NULL, 0, 0, 0 },
 };
 
 static SettingDef *tab_defs(int *count) {
@@ -565,6 +567,7 @@ static char   settings_toast_msg[64] = "Config saved.";
 static AppConfig cfg_snapshot;               // cfg state at settings open (for discard)
 static int    snapshot_theme_idx   = -1;     // current_named_theme at settings open
 static int    snapshot_font_idx    = 0;      // current_font_idx at settings open
+static int    snapshot_lang_idx    = 0;      // current_lang_idx at settings open
 static bool   settings_listening   = false;  // waiting for next button press to bind
 static SDL_GameControllerButton *settings_listen_target = NULL;
 
@@ -590,7 +593,7 @@ void draw_txt(TTF_Font *f, const char *txt, int x, int y, SDL_Color col) {
             return;
         }
     }
-    SDL_Surface *surf = TTF_RenderText_Blended(f, txt, col);
+    SDL_Surface *surf = TTF_RenderUTF8_Blended(f, txt, col);
     if (!surf) return;
     SDL_Texture *tex = SDL_CreateTextureFromSurface(renderer, surf);
     int slot = 0; Uint32 oldest = UINT32_MAX;
@@ -604,6 +607,36 @@ void draw_txt(TTF_Font *f, const char *txt, int x, int y, SDL_Color col) {
     glyph_cache[slot].w = surf->w; glyph_cache[slot].h = surf->h; glyph_cache[slot].last_used = glyph_frame;
     SDL_Rect r = { x, y, surf->w, surf->h }; SDL_RenderCopy(renderer, tex, NULL, &r);
     SDL_FreeSurface(surf);
+}
+
+// ---------------------------------------------------------------------------
+// draw_txt_clipped — like draw_txt but truncates to max_w pixels with "…"
+// ---------------------------------------------------------------------------
+void draw_txt_clipped(TTF_Font *f, const char *txt, int x, int y, int max_w, SDL_Color col) {
+    if (!txt || !txt[0] || !f) return;
+    int w = 0;
+    TTF_SizeUTF8(f, txt, &w, NULL);
+    if (w <= max_w) { draw_txt(f, txt, x, y, col); return; }
+    // Walk bytes backwards to find a truncation point that fits with "…"
+    int ew = 0;
+    TTF_SizeUTF8(f, "\xe2\x80\xa6", &ew, NULL);  // UTF-8 ellipsis U+2026
+    int avail = max_w - ew;
+    if (avail <= 0) return;
+    // Copy and shorten until it fits
+    char buf[MAX_LANG_VAL_LEN + 4];
+    strncpy(buf, txt, sizeof(buf) - 4); buf[sizeof(buf) - 4] = '\0';
+    int bl = (int)strlen(buf);
+    while (bl > 0) {
+        // Step back one UTF-8 codepoint
+        bl--;
+        while (bl > 0 && (buf[bl] & 0xC0) == 0x80) bl--;
+        buf[bl] = '\0';
+        TTF_SizeUTF8(f, buf, &w, NULL);
+        if (w <= avail) break;
+    }
+    // Append ellipsis
+    strcat(buf, "\xe2\x80\xa6");
+    draw_txt(f, buf, x, y, col);
 }
 
 // ---------------------------------------------------------------------------
@@ -643,7 +676,7 @@ static void settings_adjust(int dir) {
             load_dir(0, panes[0].current_path);
             load_dir(1, panes[1].current_path);
         } else if (d->bool_ptr == &cfg.exec_scripts && cfg.exec_scripts) {
-            strncpy(settings_toast_msg, "Experimental: scripts run as current user.",
+            strncpy(settings_toast_msg, tr("Settings_ExecWarning"),
                     sizeof(settings_toast_msg) - 1);
             settings_save_toast = SDL_GetTicks() + 3500;
             settings_toast_tw   = 0;
@@ -653,6 +686,13 @@ static void settings_adjust(int dir) {
         int count = d->hi;
         *d->int_ptr = ((*d->int_ptr) + dir + count) % count;
         vtree_log("Setting '%s': %s\n", d->label, d->opts[*d->int_ptr]);
+        settings_dirty = true;
+    } else if (d->type == STYPE_LANG) {
+        if (lang_file_count < 1) return;
+        current_lang_idx = (current_lang_idx + dir + lang_file_count) % lang_file_count;
+        strncpy(cfg.language_name, lang_names[current_lang_idx], sizeof(cfg.language_name) - 1);
+        lang_reload();
+        destroy_glyph_cache();
         settings_dirty = true;
     } else if (d->type == STYPE_PRESET) {
         int n = named_theme_count;
@@ -683,8 +723,10 @@ static void settings_do_close() {
         cfg                 = cfg_snapshot;
         current_named_theme = snapshot_theme_idx;
         current_font_idx    = snapshot_font_idx;
+        current_lang_idx    = snapshot_lang_idx;
         if (font_file_count > 0 && current_font_idx < font_file_count)
             strncpy(vtree_font_path, font_files[current_font_idx], MAX_PATH - 1);
+        lang_reload();
         destroy_glyph_cache();
     }
     reload_fonts();
@@ -724,10 +766,11 @@ static void settings_confirm() {
             cfg_snapshot       = cfg;
             snapshot_theme_idx = current_named_theme;
             snapshot_font_idx  = current_font_idx;
+            snapshot_lang_idx  = current_lang_idx;
             settings_dirty      = false;
             settings_save_toast = SDL_GetTicks() + 1800;
             settings_toast_tw   = 0;
-            strncpy(settings_toast_msg, "Config saved.", sizeof(settings_toast_msg) - 1);
+            strncpy(settings_toast_msg, tr("Settings_Saved"), sizeof(settings_toast_msg) - 1);
             if (font_menu) TTF_SizeText(font_menu, settings_toast_msg, &settings_toast_tw, NULL);
         } else if (settings_index == n - 1) {  // Close
             if (settings_dirty) { settings_save_prompt = true; save_prompt_sel = 0; }
@@ -735,7 +778,7 @@ static void settings_confirm() {
         }
     } else if (d->type == STYPE_BOOL && d->bool_ptr) {
         settings_adjust(1);  // toggle
-    } else if (d->type == STYPE_CYCLE) {
+    } else if (d->type == STYPE_CYCLE || d->type == STYPE_LANG) {
         settings_adjust(1);  // cycle forward
     } else if (d->type == STYPE_KEYBIND && d->btn_ptr) {
         settings_listening     = true;
@@ -765,23 +808,24 @@ static void draw_settings() {
     // Header bar
     SDL_SetRenderDrawColor(renderer, cfg.theme.header_bg.r, cfg.theme.header_bg.g, cfg.theme.header_bg.b, 255);
     SDL_Rect hr = {0, 0, cfg.screen_w, hh}; SDL_RenderFillRect(renderer, &hr);
-    draw_txt(font_header, "SETTINGS", cl, 5, cfg.theme.text);
+    draw_txt(font_header, tr("Settings_Header"), cl, 5, cfg.theme.text);
 
     // Tab strip
     int tab_w = cfg.screen_w / SETTINGS_TAB_COUNT;
     for (int t = 0; t < SETTINGS_TAB_COUNT; t++) {
-        SDL_Rect tr = {t * tab_w, hh, tab_w, th};
+        SDL_Rect tab_rect = {t * tab_w, hh, tab_w, th};
         if (t == settings_tab) {
             SDL_SetRenderDrawColor(renderer, cfg.theme.highlight_bg.r, cfg.theme.highlight_bg.g, cfg.theme.highlight_bg.b, 255);
         } else {
             SDL_SetRenderDrawColor(renderer, cfg.theme.alt_bg.r, cfg.theme.alt_bg.g, cfg.theme.alt_bg.b, 255);
         }
-        SDL_RenderFillRect(renderer, &tr);
+        SDL_RenderFillRect(renderer, &tab_rect);
         SDL_Color tc = (t == settings_tab) ? cfg.theme.highlight_text : cfg.theme.text_disabled;
         int tw_px = 0;
-        if (font_footer) TTF_SizeText(font_footer, settings_tab_labels[t], &tw_px, NULL);
+        const char *tab_lbl = tr(settings_tab_labels[t]);
+        if (font_footer) TTF_SizeText(font_footer, tab_lbl, &tw_px, NULL);
         int tx = t * tab_w + (tab_w - tw_px) / 2;
-        draw_txt(font_footer, settings_tab_labels[t], tx, hh + (th - cfg.font_size_footer) / 2, tc);
+        draw_txt_clipped(font_footer, tab_lbl, tx, hh + (th - cfg.font_size_footer) / 2, tab_w - 4, tc);
     }
     // Tab strip bottom border
     SDL_SetRenderDrawColor(renderer, cfg.theme.text_disabled.r, cfg.theme.text_disabled.g, cfg.theme.text_disabled.b, 255);
@@ -813,23 +857,24 @@ static void draw_settings() {
         bool greyed = (d->type == STYPE_PATH && cfg.remember_dirs);
         SDL_Color lc = greyed ? cfg.theme.text_disabled
                               : (i == settings_index) ? cfg.theme.highlight_text : cfg.theme.text;
-        draw_txt(font_menu, d->label, cl, y, lc);
+        draw_txt_clipped(font_menu, tr(d->label), cl, y, cv - cl - 16, lc);
 
         // Value column
-        char val[80] = ""; bool arrows = false;
+        char val[MAX_LANG_VAL_LEN] = ""; bool arrows = false;
         SDL_Color vc = lc;
+        int val_max_w = cfg.screen_w - cv - 16;
 
         if (d->type == STYPE_INT && d->int_ptr) {
             snprintf(val, sizeof(val), "%d", *d->int_ptr);
             arrows = true;
         } else if (d->type == STYPE_BOOL && d->bool_ptr) {
-            snprintf(val, sizeof(val), "%s", *d->bool_ptr ? "Yes" : "No");
+            snprintf(val, sizeof(val), "%s", *d->bool_ptr ? tr("Settings_Yes") : tr("Settings_No"));
             arrows = true;
         } else if (d->type == STYPE_PRESET) {
             if (current_named_theme >= 0 && current_named_theme < named_theme_count)
                 snprintf(val, sizeof(val), "%s", named_themes[current_named_theme].name);
             else
-                snprintf(val, sizeof(val), "Custom");
+                snprintf(val, sizeof(val), "%s", tr("Settings_Custom"));
             arrows = true;
         } else if (d->type == STYPE_FONT) {
             if (font_file_count > 0 && current_font_idx < font_file_count) {
@@ -842,11 +887,14 @@ static void draw_settings() {
         } else if (d->type == STYPE_CYCLE && d->int_ptr && d->opts) {
             int idx = *d->int_ptr;
             if (idx >= 0 && idx < d->hi)
-                snprintf(val, sizeof(val), "%s", d->opts[idx]);
+                snprintf(val, sizeof(val), "%s", tr(d->opts[idx]));
+            arrows = true;
+        } else if (d->type == STYPE_LANG) {
+            snprintf(val, sizeof(val), "%s", lang_file_count > 0 ? lang_names[current_lang_idx] : "English");
             arrows = true;
         } else if (d->type == STYPE_KEYBIND && d->btn_ptr) {
             if (settings_listening && settings_listen_target == d->btn_ptr) {
-                snprintf(val, sizeof(val), "Press button...");
+                snprintf(val, sizeof(val), "%s", tr("Settings_PressButton"));
                 vc = cfg.theme.highlight_text;
             } else {
                 snprintf(val, sizeof(val), "%s", btn_label(*d->btn_ptr));
@@ -861,16 +909,18 @@ static void draw_settings() {
                         : (i == settings_index) ? cfg.theme.highlight_text : cfg.theme.text;
         } else {
             // STYPE_ACTION
-            snprintf(val, sizeof(val), "[ %s ]", d->label);
+            snprintf(val, sizeof(val), "[ %s ]", tr(d->label));
             vc = (i == settings_index) ? cfg.theme.highlight_text : cfg.theme.text_disabled;
         }
 
         if (arrows && i == settings_index) {
+            int vw = 0;
+            if (font_menu) TTF_SizeUTF8(font_menu, val, &vw, NULL);
             draw_txt(font_menu, "<", cv, y, vc);
-            draw_txt(font_menu, val, cv + aw + 6, y, vc);
-            draw_txt(font_menu, ">", cv + aw + 6 + (int)strlen(val) * (aw - 2) + 6, y, vc);
+            draw_txt_clipped(font_menu, val, cv + aw + 6, y, val_max_w - aw*2 - 12, vc);
+            draw_txt(font_menu, ">", cv + aw + 6 + vw + 6, y, vc);
         } else {
-            draw_txt(font_menu, val, cv, y, vc);
+            draw_txt_clipped(font_menu, val, cv, y, val_max_w, vc);
         }
     }
 
@@ -884,9 +934,9 @@ static void draw_settings() {
     SDL_SetRenderDrawColor(renderer, cfg.theme.header_bg.r, cfg.theme.header_bg.g, cfg.theme.header_bg.b, 255);
     SDL_Rect fr = {0, cfg.screen_h - fh, cfg.screen_w, fh}; SDL_RenderFillRect(renderer, &fr);
     const char *hint = settings_listening
-        ? "Press any button to bind   B: Cancel"
-        : "Up/Dn: Navigate   L/R: Change   A: Confirm   L1/R1: Switch tab   B: Close";
-    draw_txt(font_footer, hint, 12, cfg.screen_h - fh + 6, cfg.theme.text_disabled);
+        ? tr("Settings_HintBinding")
+        : tr("Settings_HintNormal");
+    draw_txt_clipped(font_footer, hint, 12, cfg.screen_h - fh + 6, cfg.screen_w - 24, cfg.theme.text_disabled);
 
     // Save prompt modal
     if (settings_save_prompt) {
@@ -908,9 +958,9 @@ static void draw_settings() {
         SDL_SetRenderDrawColor(renderer, cfg.theme.menu_border.r, cfg.theme.menu_border.g, cfg.theme.menu_border.b, 255);
         SDL_RenderDrawRect(renderer, &mbg);
         SDL_RenderSetClipRect(renderer, &mbg);
-        draw_txt(font_footer, "Unsaved changes - save before closing?", mx + 12,
-                 my + (hh - cfg.font_size_footer) / 2, cfg.theme.text_disabled);
-        const char *opts[2] = { "Save and Close", "Discard and Close" };
+        draw_txt_clipped(font_footer, tr("Settings_UnsavedPrompt"), mx + 12,
+                 my + (hh - cfg.font_size_footer) / 2, mw - 24, cfg.theme.text_disabled);
+        const char *opts[2] = { tr("Settings_SaveAndClose"), tr("Settings_DiscardAndClose") };
         for (int i = 0; i < 2; i++) {
             int iy = my + hh + i * spc;
             if (i == save_prompt_sel) {
@@ -918,7 +968,7 @@ static void draw_settings() {
                 SDL_Rect row = {mx+2, iy-2, mw-4, spc}; SDL_RenderFillRect(renderer, &row);
             }
             SDL_Color lc = (i == save_prompt_sel) ? cfg.theme.highlight_text : cfg.theme.text;
-            draw_txt(font_menu, opts[i], mx + 16, iy + (spc - cfg.font_size_menu) / 2, lc);
+            draw_txt_clipped(font_menu, opts[i], mx + 16, iy + (spc - cfg.font_size_menu) / 2, mw - 32, lc);
         }
         SDL_RenderSetClipRect(renderer, NULL);
     }
@@ -969,7 +1019,7 @@ static void draw_open_chooser() {
     SDL_RenderDrawRect(renderer, &mbg);
 
     SDL_RenderSetClipRect(renderer, &mbg);
-    draw_txt(font_footer, "Action:", mx + 12, my + (hh - cfg.font_size_footer) / 2, cfg.theme.text_disabled);
+    draw_txt_clipped(font_footer, tr("ActionChooser_Title"), mx + 12, my + (hh - cfg.font_size_footer) / 2, mw - 24, cfg.theme.text_disabled);
 
     SDL_Texture *act_icons[] = { tex_viewer, tex_hexview, tex_imgview, tex_fileinfo, NULL, tex_exec };
 
@@ -982,17 +1032,23 @@ static void draw_open_chooser() {
             SDL_Rect row = {mx + 2, iy - 2, mw - 4, spc};
             SDL_RenderFillRect(renderer, &row);
         }
-        SDL_Texture *icn = (act < 6) ? act_icons[act] : NULL;
-        if (icn) { SDL_Rect ir = {mx + 12, iy + (spc - isz) / 2, isz, isz}; SDL_SetTextureAlphaMod(icn, 255); SDL_RenderCopy(renderer, icn, NULL, &ir); }
-        SDL_Color lc = (i == choose_selection) ? cfg.theme.marked :
+        SDL_Color lc = (i == choose_selection) ? cfg.theme.highlight_text :
                        (act == ACT_CANCEL      ? cfg.theme.text_disabled : cfg.theme.text);
-        const char *act_lbl = (choose_path_is_dir && act == ACT_INFO) ? "Dir Info" : act_labels[act];
+        SDL_Texture *icn = (act < 6) ? act_icons[act] : NULL;
+        if (icn) {
+            SDL_Rect ir = {mx + 12, iy + (spc - isz) / 2, isz, isz};
+            SDL_SetTextureAlphaMod(icn, 255);
+            if (cfg.tint_icons) SDL_SetTextureColorMod(icn, lc.r, lc.g, lc.b);
+            SDL_RenderCopy(renderer, icn, NULL, &ir);
+            SDL_SetTextureColorMod(icn, 255, 255, 255);
+        }
+        const char *act_lbl = tr((choose_path_is_dir && act == ACT_INFO) ? "ActionChooser_DirInfo" : act_labels[act]);
         char lbl[64];
         if (i == choose_default)
             snprintf(lbl, sizeof(lbl), "%s  *", act_lbl);
         else
             snprintf(lbl, sizeof(lbl), "%s", act_lbl);
-        draw_txt(font_menu, lbl, mx + isz + 20, iy + (spc - cfg.font_size_menu) / 2, lc);
+        draw_txt_clipped(font_menu, lbl, mx + isz + 20, iy + (spc - cfg.font_size_menu) / 2, mw - isz - 36, lc);
     }
     SDL_RenderSetClipRect(renderer, NULL);
 }
@@ -1029,17 +1085,17 @@ static void draw_fileinfo_modal() {
     int lx = mx + 18;
     if (tex_file) { SDL_Rect ir = {lx, my + (hh - 24) / 2, 24, 24}; SDL_RenderCopy(renderer, tex_file, NULL, &ir); lx += 30; }
     const char *fi_title = fileinfo_is_multi
-        ? (fileinfo_is_dir ? "Dir Info" : "Selection Info")
-        : (fileinfo_is_dir ? "Dir Info" : "File Info");
+        ? (fileinfo_is_dir ? tr("FileInfo_TitleDir") : tr("FileInfo_TitleSelection"))
+        : (fileinfo_is_dir ? tr("FileInfo_TitleDir") : tr("FileInfo_TitleFile"));
     draw_txt(font_header, fi_title, lx, my + (hh - cfg.font_size_header) / 2, cfg.theme.marked);
 
     int ty = my + hh + 10;
     for (int i = 0; i < fileinfo_line_count; i++) {
-        draw_txt(font_menu, fileinfo_lines[i], mx + 18, ty, cfg.theme.text);
+        draw_txt_clipped(font_menu, fileinfo_lines[i], mx + 18, ty, mw - 36, cfg.theme.text);
         ty += lh;
     }
     ty += 6;
-    draw_txt(font_footer, "Press any button to close", mx + 18, ty, cfg.theme.text_disabled);
+    draw_txt_clipped(font_footer, tr("FileInfo_DismissHint"), mx + 18, ty, mw - 36, cfg.theme.text_disabled);
 
     SDL_RenderSetClipRect(renderer, NULL);
 }
@@ -1080,19 +1136,19 @@ static void draw_about_modal() {
     int lx = mx + 18;
     if (tex_about) { SDL_Rect ir = {lx, my + (hh - 24) / 2, 24, 24}; SDL_RenderCopy(renderer, tex_about, NULL, &ir); lx += 30; }
     char title_buf[32];
-    snprintf(title_buf, sizeof(title_buf), "vTree Gold v" VTREE_VERSION);
+    snprintf(title_buf, sizeof(title_buf), "%s" VTREE_VERSION, tr("AppTitle"));
     draw_txt(font_header, title_buf, lx, my + (hh - cfg.font_size_header) / 2, cfg.theme.marked);
 
     int ty = my + hh + 14;
-    draw_txt(font_menu, "Gamepad-driven twin-panel file manager", mx + 18, ty, cfg.theme.text);
+    draw_txt_clipped(font_menu, tr("About_Subtitle"), mx + 18, ty, mw - 36, cfg.theme.text);
     ty += lh;
-    draw_txt(font_menu, "Built with SDL2, SDL2_ttf, SDL2_image", mx + 18, ty, cfg.theme.text_disabled);
+    draw_txt_clipped(font_menu, tr("About_BuiltWith"), mx + 18, ty, mw - 36, cfg.theme.text_disabled);
     ty += lh;
-    draw_txt(font_menu, "Font: JetBrains Mono (OFL 1.1, JetBrains s.r.o.)", mx + 18, ty, cfg.theme.text_disabled);
+    draw_txt_clipped(font_menu, tr("About_Font"), mx + 18, ty, mw - 36, cfg.theme.text_disabled);
     ty += lh;
-    draw_txt(font_menu, "Icons: LineIcons (MIT, lineicons.com)", mx + 18, ty, cfg.theme.text_disabled);
+    draw_txt_clipped(font_menu, tr("About_Icons"), mx + 18, ty, mw - 36, cfg.theme.text_disabled);
     ty += lh + lh/2;
-    draw_txt(font_footer, "Press any button to close", mx + 18, ty, cfg.theme.text_disabled);
+    draw_txt_clipped(font_footer, tr("About_DismissHint"), mx + 18, ty, mw - 36, cfg.theme.text_disabled);
 
     SDL_RenderSetClipRect(renderer, NULL); // restore
 }
@@ -1110,9 +1166,8 @@ static bool is_shell_script(const char *name) {
 // ---------------------------------------------------------------------------
 static void do_symlink(int pane_idx) {
     if (!fs_supports_symlinks(panes[pane_idx].current_path)) {
-        snprintf(exec_error_title, sizeof(exec_error_title), "Cannot Create Symlink");
-        snprintf(exec_error_msg, sizeof(exec_error_msg),
-                 "Destination filesystem does not support symlinks");
+        snprintf(exec_error_title, sizeof(exec_error_title), "%s", tr("Error_CannotSymlinkTitle"));
+        snprintf(exec_error_msg, sizeof(exec_error_msg), "%s", tr("Error_NoSymlinkSupport"));
         exec_error_active     = true;
         do_symlink_after_dest = false;
         paste_dest_active     = false;
@@ -1166,9 +1221,9 @@ static void draw_exec_error_modal(void) {
     SDL_RenderDrawRect(renderer, &mbg);
     SDL_RenderSetClipRect(renderer, &mbg);
 
-    draw_txt(font_header, exec_error_title, mx + 18, my + (hh - cfg.font_size_header) / 2, cfg.theme.marked);
-    draw_txt(font_menu,   exec_error_msg,   mx + 18, my + hh + 8, cfg.theme.text);
-    draw_txt(font_footer, "Press any button to close", mx + 18, my + hh + lh + 12, cfg.theme.text_disabled);
+    draw_txt_clipped(font_header, exec_error_title, mx + 18, my + (hh - cfg.font_size_header) / 2, mw - 36, cfg.theme.marked);
+    draw_txt_clipped(font_menu,   exec_error_msg,   mx + 18, my + hh + 8, mw - 36, cfg.theme.text);
+    draw_txt_clipped(font_footer, tr("Error_DismissHint"), mx + 18, my + hh + lh + 12, mw - 36, cfg.theme.text_disabled);
     SDL_RenderSetClipRect(renderer, NULL);
 }
 
@@ -1180,9 +1235,8 @@ static void vtree_exec_script(const char *path) {
     if (stat(path, &st) == 0 && !(st.st_mode & (S_IXUSR | S_IXGRP | S_IXOTH))) {
         const char *base = strrchr(path, '/');
         base = base ? base + 1 : path;
-        snprintf(exec_error_title, sizeof(exec_error_title), "Cannot Execute");
-        snprintf(exec_error_msg, sizeof(exec_error_msg),
-                 "'%s' is not executable  (chmod +x to fix)", base);
+        snprintf(exec_error_title, sizeof(exec_error_title), "%s", tr("Error_CannotExecuteTitle"));
+        snprintf(exec_error_msg, sizeof(exec_error_msg), tr("Error_NotExecutable"), base);
         exec_error_active = true;
         current_mode = MODE_EXPLORER;
         return;
@@ -1282,7 +1336,7 @@ static void open_file(const char *path, const char *name) {
 // ---------------------------------------------------------------------------
 typedef enum { PC_OVERWRITE = 0, PC_KEEP_BOTH = 1, PC_SKIP = 2, PC_CANCEL = 3 } PasteConflict;
 #define PC_MAX 4
-static const char *pc_labels[PC_MAX] = { "Overwrite", "Keep Both", "Skip", "Cancel" };
+static const char *pc_labels[PC_MAX] = { "Paste_Overwrite", "Paste_KeepBoth", "Paste_Skip", "Paste_Cancel" };
 
 // Generate a unique destination path: "stem (copy).ext", "stem (copy 2).ext", ...
 static void make_copy_path(const char *dir, const char *name, char *out) {
@@ -1387,10 +1441,10 @@ static void draw_paste_dest(void) {
     SDL_RenderDrawRect(renderer, &mbg);
     SDL_RenderSetClipRect(renderer, &mbg);
 
-    draw_txt(font_footer, do_symlink_after_dest ? "Symlink Destination:" : "Paste Destination:",
-             mx + 12, my + (hh - cfg.font_size_footer) / 2, cfg.theme.text_disabled);
+    draw_txt_clipped(font_footer, do_symlink_after_dest ? tr("Paste_SymlinkDestTitle") : tr("Paste_DestTitle"),
+             mx + 12, my + (hh - cfg.font_size_footer) / 2, mw - 24, cfg.theme.text_disabled);
 
-    const char *dest_labels[2] = { "This pane", "Other pane" };
+    const char *dest_labels[2] = { tr("Paste_ThisPane"), tr("Paste_OtherPane") };
     for (int i = 0; i < 2; i++) {
         int pane_i = (i == 0) ? active_pane : (1 - active_pane);
         int iy = my + hh + i * spc;
@@ -1399,10 +1453,10 @@ static void draw_paste_dest(void) {
             SDL_Rect row = {mx + 2, iy - 2, mw - 4, spc};
             SDL_RenderFillRect(renderer, &row);
         }
-        SDL_Color lc = (i == paste_dest_sel) ? cfg.theme.marked : cfg.theme.text;
+        SDL_Color lc = (i == paste_dest_sel) ? cfg.theme.highlight_text : cfg.theme.text;
         char line[MAX_PATH + 16];
         snprintf(line, sizeof(line), "%-10s  %s", dest_labels[i], panes[pane_i].current_path);
-        draw_txt(font_menu, line, mx + 16, iy + (spc - cfg.font_size_menu) / 2, lc);
+        draw_txt_clipped(font_menu, line, mx + 16, iy + (spc - cfg.font_size_menu) / 2, mw - 32, lc);
     }
     SDL_RenderSetClipRect(renderer, NULL);
 }
@@ -1431,9 +1485,9 @@ static void draw_paste_conflict(void) {
     SDL_RenderSetClipRect(renderer, &mbg);
 
     char title[48];
-    snprintf(title, sizeof(title), "%d File(s) Already Exist", paste_conflict_count);
-    draw_txt(font_footer, title, mx + 12,
-             my + (hh - cfg.font_size_footer) / 2, cfg.theme.text_disabled);
+    snprintf(title, sizeof(title), tr("Paste_ConflictTitle"), paste_conflict_count);
+    draw_txt_clipped(font_footer, title, mx + 12,
+             my + (hh - cfg.font_size_footer) / 2, mw - 24, cfg.theme.text_disabled);
 
     for (int i = 0; i < PC_MAX; i++) {
         int iy = my + hh + i * spc;
@@ -1444,7 +1498,7 @@ static void draw_paste_conflict(void) {
         }
         SDL_Color lc = (i == paste_conflict_sel) ? cfg.theme.marked : cfg.theme.text;
         if (i == PC_CANCEL && i != paste_conflict_sel) lc = cfg.theme.text_disabled;
-        draw_txt(font_menu, pc_labels[i], mx + 16, iy + (spc - cfg.font_size_menu) / 2, lc);
+        draw_txt_clipped(font_menu, tr(pc_labels[i]), mx + 16, iy + (spc - cfg.font_size_menu) / 2, mw - 32, lc);
     }
     SDL_RenderSetClipRect(renderer, NULL);
 }
@@ -1542,6 +1596,7 @@ int main(int argc, char *argv[]) {
 
     load_config();
     if (cmdline_rotation >= 0) cfg.rotation = cmdline_rotation;  // CLI overrides config.ini
+    lang_init();
     scan_fonts();   // builds font_files[] and sets current_font_idx from cfg.font_path
 
     // Log config / display / theme
@@ -1966,6 +2021,7 @@ int main(int argc, char *argv[]) {
                                 cfg_snapshot       = cfg;
                                 snapshot_theme_idx = current_named_theme;
                                 snapshot_font_idx  = current_font_idx;
+                                snapshot_lang_idx  = current_lang_idx;
                                 pending_keys_from_cfg();
                                 settings_tab = 0;
                                 settings_tab_indices[0] = settings_tab_indices[1] = settings_tab_indices[2] = 0;
@@ -1999,6 +2055,7 @@ int main(int argc, char *argv[]) {
                                 cfg_snapshot       = cfg;
                                 snapshot_theme_idx = current_named_theme;
                                 snapshot_font_idx  = current_font_idx;
+                                snapshot_lang_idx  = current_lang_idx;
                                 settings_dirty = false;
                                 settings_save_toast = SDL_GetTicks() + 1800;
                             }
@@ -2015,7 +2072,7 @@ int main(int argc, char *argv[]) {
                             }
                         }
                         if (conflict) {
-                            strncpy(settings_toast_msg, "Already bound!", sizeof(settings_toast_msg) - 1);
+                            strncpy(settings_toast_msg, tr("Settings_AlreadyBound"), sizeof(settings_toast_msg) - 1);
                             settings_save_toast = SDL_GetTicks() + 1800;
                             settings_toast_tw   = 0;
                             if (font_menu) TTF_SizeText(font_menu, settings_toast_msg, &settings_toast_tw, NULL);
@@ -2334,9 +2391,10 @@ int main(int argc, char *argv[]) {
         char f_text[256];
         if (panes[active_pane].file_count > 0) {
             FileEntry *sel = &panes[active_pane].files[panes[active_pane].selected_index];
-            char sz[16] = "DIR"; if (!sel->is_dir) format_size(sel->size, sz);
-            snprintf(f_text, 256, "P%d [%d/%d] %s | %s", active_pane+1, panes[active_pane].selected_index+1, panes[active_pane].file_count, sel->name, sz);
-        } else { snprintf(f_text, 256, "P%d Empty", active_pane+1); }
+            char sz[16]; strncpy(sz, tr("Footer_SizeDir"), sizeof(sz)-1); sz[sizeof(sz)-1]='\0';
+            if (!sel->is_dir) format_size(sel->size, sz);
+            snprintf(f_text, 256, tr("Footer_Pane"), active_pane+1, panes[active_pane].selected_index+1, panes[active_pane].file_count, sel->name, sz);
+        } else { snprintf(f_text, 256, tr("Footer_Empty"), active_pane+1); }
         draw_txt(font_footer, f_text, 12, cfg.screen_h - foot_h + 6, cfg.theme.text);
         // Clipboard badge — icon + count, floating above bottom-right corner
         if (clip.op != OP_NONE) {
@@ -2363,7 +2421,9 @@ int main(int argc, char *argv[]) {
             if (clip_icon) {
                 SDL_Rect ir = {bx + pad, by + pad, ico, ico};
                 SDL_SetTextureAlphaMod(clip_icon, 255);
+                if (cfg.tint_icons) SDL_SetTextureColorMod(clip_icon, cfg.theme.text.r, cfg.theme.text.g, cfg.theme.text.b);
                 SDL_RenderCopy(renderer, clip_icon, NULL, &ir);
+                SDL_SetTextureColorMod(clip_icon, 255, 255, 255);
             }
 
             // Count: bottom-right with padding
@@ -2396,15 +2456,28 @@ int main(int argc, char *argv[]) {
                 SDL_Texture *top_icons[TOPMENU_MAX] = { tex_folder, tex_settings, tex_about, tex_exit };
                 for (int i = 0; i < TOPMENU_MAX; i++) {
                     bool sel = (i == menu_selection);
-                    SDL_Color c = sel ? cfg.theme.marked : cfg.theme.text;
+                    SDL_Color c = sel ? cfg.theme.highlight_text : cfg.theme.text;
                     int iy = my + 10 + i * spc;
-                    if (top_icons[i]) { SDL_Rect ir={mx+15,iy+(spc-isz)/2,isz,isz}; SDL_SetTextureAlphaMod(top_icons[i],255); SDL_RenderCopy(renderer,top_icons[i],NULL,&ir); }
-                    draw_txt(font_menu, topmenu_items[i], mx+60, iy+(spc-cfg.font_size_menu)/2, c);
+                    if (sel) {
+                        SDL_SetRenderDrawColor(renderer, cfg.theme.highlight_bg.r, cfg.theme.highlight_bg.g, cfg.theme.highlight_bg.b, 255);
+                        SDL_Rect row = {mx + 2, iy - 2, mw - 4, spc};
+                        SDL_RenderFillRect(renderer, &row);
+                    }
+                    if (top_icons[i]) {
+                        SDL_Rect ir={mx+15,iy+(spc-isz)/2,isz,isz};
+                        SDL_SetTextureAlphaMod(top_icons[i],255);
+                        if (cfg.tint_icons) SDL_SetTextureColorMod(top_icons[i], c.r, c.g, c.b);
+                        SDL_RenderCopy(renderer,top_icons[i],NULL,&ir);
+                        SDL_SetTextureColorMod(top_icons[i], 255, 255, 255);
+                    }
+                    draw_txt_clipped(font_menu, tr(topmenu_items[i]), mx+60, iy+(spc-cfg.font_size_menu)/2, mw-75, c);
                     // Arrow indicator for Files entry
                     if (i == TOPMENU_FILES && tex_enterfol) {
                         SDL_Rect ar = { mx+mw-isz-15, iy+(spc-isz)/2, isz, isz };
                         SDL_SetTextureAlphaMod(tex_enterfol, 255);
+                        if (cfg.tint_icons) SDL_SetTextureColorMod(tex_enterfol, c.r, c.g, c.b);
                         SDL_RenderCopy(renderer, tex_enterfol, NULL, &ar);
+                        SDL_SetTextureColorMod(tex_enterfol, 255, 255, 255);
                     }
                 }
             } else {
@@ -2426,12 +2499,23 @@ int main(int argc, char *argv[]) {
                                (_dotdot && (i == FILEMENU_COPY || i == FILEMENU_CUT ||
                                             i == FILEMENU_RENAME || i == FILEMENU_DELETE));
                     bool sel = (i == filemenu_sel);
-                    SDL_Color c = dis ? cfg.theme.text_disabled : (sel ? cfg.theme.marked : cfg.theme.text);
-                    const char *lbl = filemenu_items[i];
-                    if (i == FILEMENU_DELETE && delete_confirm_active) lbl = "CONFIRM DELETE?";
+                    SDL_Color c = dis ? cfg.theme.text_disabled : (sel ? cfg.theme.highlight_text : cfg.theme.text);
                     int iy = my + 10 + i * spc;
-                    if (sub_icons[i]) { SDL_Rect ir={mx+15,iy+(spc-isz)/2,isz,isz}; SDL_SetTextureAlphaMod(sub_icons[i],dis?80:255); SDL_RenderCopy(renderer,sub_icons[i],NULL,&ir); }
-                    draw_txt(font_menu, lbl, mx+60, iy+(spc-cfg.font_size_menu)/2, c);
+                    if (sel) {
+                        SDL_SetRenderDrawColor(renderer, cfg.theme.highlight_bg.r, cfg.theme.highlight_bg.g, cfg.theme.highlight_bg.b, 255);
+                        SDL_Rect row = {mx + 2, iy - 2, mw - 4, spc};
+                        SDL_RenderFillRect(renderer, &row);
+                    }
+                    const char *lbl = tr(filemenu_items[i]);
+                    if (i == FILEMENU_DELETE && delete_confirm_active) lbl = tr("FileOp_ConfirmDelete");
+                    if (sub_icons[i]) {
+                        SDL_Rect ir={mx+15,iy+(spc-isz)/2,isz,isz};
+                        SDL_SetTextureAlphaMod(sub_icons[i], dis ? 80 : 255);
+                        if (cfg.tint_icons) SDL_SetTextureColorMod(sub_icons[i], c.r, c.g, c.b);
+                        SDL_RenderCopy(renderer,sub_icons[i],NULL,&ir);
+                        SDL_SetTextureColorMod(sub_icons[i], 255, 255, 255);
+                    }
+                    draw_txt_clipped(font_menu, lbl, mx+60, iy+(spc-cfg.font_size_menu)/2, mw-75, c);
                 }
             }
 

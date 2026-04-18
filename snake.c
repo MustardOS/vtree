@@ -480,11 +480,11 @@ static void draw_snake(SnakeTheme *th) {
 
 static void draw_high_scores(SnakeTheme *th, int y_start) {
     if (hs_count == 0) {
-        draw_centered(font_footer, "No scores yet", y_start, th->text_dim);
+        draw_centered(font_footer, tr("Snake_NoScores"), y_start, th->text_dim);
         return;
     }
     int lh = font_footer ? TTF_FontHeight(font_footer) + 4 : 20;
-    draw_centered(font_footer, "HIGH SCORES", y_start, th->text_mid);
+    draw_centered(font_footer, tr("Snake_HighScores"), y_start, th->text_mid);
     y_start += lh + 4;
     for (int i = 0; i < hs_count; i++) {
         char line[32];
@@ -504,8 +504,8 @@ static void draw_name_entry(SnakeTheme *th) {
 
     int cy = cfg.screen_h / 2 - 50;
     char rank_msg[32];
-    snprintf(rank_msg, sizeof(rank_msg), "Rank #%d  Score: %d", sn.hs_rank+1, sn.score);
-    draw_centered(font_header, "NEW HIGH SCORE!", cy, th->header_text);
+    snprintf(rank_msg, sizeof(rank_msg), tr("Snake_RankScore"), sn.hs_rank+1, sn.score);
+    draw_centered(font_header, tr("Snake_NewHighScore"), cy, th->header_text);
     draw_centered(font_footer, rank_msg, cy + cfg.font_size_header + 6, th->header_text);
 
     // 3 character slots — extra footer height ensures ^ arrow clears rank row
@@ -538,7 +538,7 @@ static void draw_name_entry(SnakeTheme *th) {
     }
 
     int hint_y = sy + slot_w + cfg.font_size_footer + 14;
-    draw_centered(font_footer, "Up/Dn: Change   Right/A: Next   B: Cancel", hint_y, th->header_text);
+    draw_centered(font_footer, tr("Snake_NameHint"), hint_y, th->header_text);
 }
 
 void snake_draw(void) {
@@ -553,12 +553,12 @@ void snake_draw(void) {
 
     // Header text
     char score_buf[24];
-    snprintf(score_buf, sizeof(score_buf), "Score: %d", sn.score);
-    draw_txt(font_header, "SNAKE",    14, (SNAKE_HDR_H - cfg.font_size_header)/2, th.header_text);
+    snprintf(score_buf, sizeof(score_buf), tr("Snake_ScorePrefix"), sn.score);
+    draw_txt(font_header, tr("Snake_Title"), 14, (SNAKE_HDR_H - cfg.font_size_header)/2, th.header_text);
     draw_txt(font_menu,   score_buf,
              cfg.screen_w/2 - 40, (SNAKE_HDR_H - cfg.font_size_menu)/2, th.text_mid);
     {
-        const char *hint = "B:Exit  Y:Theme";
+        const char *hint = tr("Snake_HintPaused");
         int hw = 0;
         if (font_footer) TTF_SizeText(font_footer, hint, &hw, NULL);
         draw_txt(font_footer, hint,
@@ -570,8 +570,8 @@ void snake_draw(void) {
     // Splash screen
     if (!sn.started) {
         int cy = cfg.screen_h / 2 - 30;
-        draw_centered(font_header, "Press A to start", cy, th.text_hi);
-        draw_centered(font_footer, "D-pad: Steer   B: Exit   Y: Theme", cy + cfg.font_size_header + 10, th.text_dim);
+        draw_centered(font_header, tr("Snake_PressStart"), cy, th.text_hi);
+        draw_centered(font_footer, tr("Snake_HintPlay"), cy + cfg.font_size_header + 10, th.text_dim);
         int hs_y = cy + cfg.font_size_header + cfg.font_size_footer + 30;
         draw_high_scores(&th, hs_y);
         return;
@@ -588,7 +588,7 @@ void snake_draw(void) {
         SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
 
         char msg[40];
-        snprintf(msg, sizeof(msg), "GAME OVER   Score: %d", sn.score);
+        snprintf(msg, sizeof(msg), tr("Snake_GameOver"), sn.score);
         draw_centered(font_header, msg,    cfg.screen_h/2 - 20, th.header_text);
         draw_centered(font_footer, "...",  cfg.screen_h/2 + 12, th.header_text);
     }
@@ -602,7 +602,7 @@ void snake_draw(void) {
         SDL_Rect ov = {0, 0, cfg.screen_w, cfg.screen_h};
         SDL_RenderFillRect(renderer, &ov);
         SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
-        draw_centered(font_header, "Quit?",           cfg.screen_h/2 - cfg.font_size_header - 4, th.header_text);
-        draw_centered(font_footer, "A: Yes   B: No",  cfg.screen_h/2 + 4,                        th.header_text);
+        draw_centered(font_header, tr("Snake_QuitPrompt"), cfg.screen_h/2 - cfg.font_size_header - 4, th.header_text);
+        draw_centered(font_footer, tr("Snake_QuitConfirm"), cfg.screen_h/2 + 4,                        th.header_text);
     }
 }

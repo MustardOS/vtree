@@ -208,6 +208,8 @@ void load_config() {
     cfg.single_pane   = false;
     cfg.tint_icons    = true;
     cfg.rotation      = 0;
+    strncpy(cfg.language_name, "English", sizeof(cfg.language_name) - 1);
+    cfg.language_name[sizeof(cfg.language_name) - 1] = '\0';
 
     // Default theme = built-in Dark fallback (overwritten below if file found)
     cfg.theme = dark_fallback;
@@ -310,6 +312,7 @@ void load_config() {
         else if (strcmp(k, "SinglePane")   == 0) cfg.single_pane   = (strcmp(v,"true")==0 || strcmp(v,"1")==0);
         else if (strcmp(k, "TintIcons")    == 0) cfg.tint_icons    = (strcmp(v,"true")==0 || strcmp(v,"1")==0);
         else if (strcmp(k, "Rotation")     == 0) { int r = atoi(v); cfg.rotation = (r >= 0 && r <= 3) ? r : 0; }
+        else if (strcmp(k, "Language")     == 0) strncpy(cfg.language_name, v, sizeof(cfg.language_name) - 1);
         // [Paths]
         else if (strcmp(k, "StartDirectoryLeft")  == 0) strcpy(cfg.start_left,        v);
         else if (strcmp(k, "StartDirectoryRight") == 0) strcpy(cfg.start_right,       v);
@@ -394,6 +397,7 @@ void save_config() {
     fprintf(f, "ExecScripts=%s\n",  cfg.exec_scripts  ? "true" : "false");
     fprintf(f, "SinglePane=%s\n",   cfg.single_pane   ? "true" : "false");
     fprintf(f, "TintIcons=%s\n",    cfg.tint_icons    ? "true" : "false");
+    fprintf(f, "Language=%s\n",    cfg.language_name);
 
     fprintf(f, "\n[Display]\n");
     // Always save physical dims so that Rotation= can be applied correctly on next load

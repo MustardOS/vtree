@@ -106,6 +106,7 @@ typedef struct {
     bool single_pane;    // show only one full-width pane instead of the split view
     bool tint_icons;     // tint file-list icons to match their row's theme colour
     int  rotation;       // display rotation: 0=none, 1=90°CW, 2=180°, 3=270°CW
+    char language_name[64];  // display name of the active language (e.g. "English")
 } AppConfig;
 
 typedef struct {
@@ -155,9 +156,13 @@ char *trim(char *str);
 void  format_size(long long bytes, char *out);
 void  join_path(char *out, const char *dir, const char *name);
 
+// lang.c — i18n
+#include "lang.h"
+
 // main.c
 void destroy_glyph_cache();
 void draw_txt(TTF_Font *f, const char *txt, int x, int y, SDL_Color col);
+void draw_txt_clipped(TTF_Font *f, const char *txt, int x, int y, int max_w, SDL_Color col);
 extern SDL_Renderer      *renderer;
 extern SDL_Window        *window;
 extern SDL_GameController *pad;

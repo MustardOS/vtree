@@ -449,7 +449,7 @@ void hexview_draw(void) {
     // OFFSET label — left-aligned with a fixed margin so it never touches
     // the separator line to its right.
 #define HV_OFFSET_MARGIN 6
-    draw_txt(font_footer, "OFFSET", HV_OFFSET_MARGIN,
+    draw_txt(font_footer, tr("HexView_OffsetHeader"), HV_OFFSET_MARGIN,
              cy + (clab_h - cfg.font_size_footer) / 2,
              cfg.theme.text_disabled);
 
@@ -469,7 +469,7 @@ void hexview_draw(void) {
 
     // "TEXT" label right-aligned in the ASCII panel
     {
-        const char *txt_lbl = "TEXT";
+        const char *txt_lbl = tr("HexView_TextHeader");
         int tw = 0;
         if (font_footer) TTF_SizeText(font_footer, txt_lbl, &tw, NULL);
         // Right-align: place so its right edge lines up with the panel's right edge
@@ -542,7 +542,7 @@ void hexview_draw(void) {
                 snprintf(hex, sizeof(hex), "%02X", hv.edit_buf);
             else
                 snprintf(hex, sizeof(hex), "%02X", b);
-            SDL_Color hcol = is_cursor ? cfg.theme.marked : hv_color(hv_classify(b));
+            SDL_Color hcol = is_cursor ? cfg.theme.highlight_text : hv_color(hv_classify(b));
             draw_txt(hv_f(), hex, hex_x + c * cell_w, ry + 2, hcol);
 
             // ── ASCII cell — right-aligned panel ────────────────────────────
@@ -556,7 +556,7 @@ void hexview_draw(void) {
                     SDL_RenderFillRect(renderer, &ac);
                 }
                 hv_draw_ascii(b, ax, ry + 2,
-                              is_cursor ? cfg.theme.marked : hv_color(hv_classify(b)));
+                              is_cursor ? cfg.theme.highlight_text : hv_color(hv_classify(b)));
             }
         }
     }
@@ -570,21 +570,15 @@ void hexview_draw(void) {
     char hint[256] = "";
     if (hv.mode == HVM_READ) {
         if (!hv.read_only)
-            snprintf(hint, sizeof(hint),
-                     "D-Pad: Cursor   L1/R1: Page   A: Edit   X: Goto   Start: Save   B: Close");
+            snprintf(hint, sizeof(hint), "%s", tr("HexView_HintRead"));
         else
-            snprintf(hint, sizeof(hint),
-                     "D-Pad: Cursor   L1/R1: Page   X: Goto   B: Close   [Read-Only]");
+            snprintf(hint, sizeof(hint), "%s", tr("HexView_HintReadOnly"));
     } else if (hv.mode == HVM_EDIT) {
-        snprintf(hint, sizeof(hint),
-                 "Edit: 0x%02X   Up/Dn: +/-1   L/R: x/16   A: Write   B: Cancel",
-                 hv.edit_buf);
+        snprintf(hint, sizeof(hint), tr("HexView_HintEdit"), hv.edit_buf);
     } else if (hv.mode == HVM_GOTO) {
-        snprintf(hint, sizeof(hint),
-                 "Goto: 0x%06X   Up/Dn: +/-1   L/R: x/16   A: Jump   B: Cancel",
-                 hv.goto_addr);
+        snprintf(hint, sizeof(hint), tr("HexView_HintGoto"), hv.goto_addr);
     }
-    draw_txt(font_footer, hint, 8,
+    draw_txt_clipped(font_footer, hint, 8,
              cfg.screen_h - foot_h + (foot_h - cfg.font_size_footer) / 2,
-             cfg.theme.text_disabled);
+             cfg.screen_w - 16, cfg.theme.text_disabled);
 }

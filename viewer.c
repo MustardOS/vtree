@@ -285,8 +285,8 @@ void viewer_draw(void) {
     char title[MAX_PATH + 16];
     snprintf(title, sizeof(title), "%s%s%s",
              bname,
-             tv.modified   ? " [modified]" : "",
-             tv.read_only  ? " [read-only]" : "");
+             tv.modified   ? tr("Viewer_Modified") : "",
+             tv.read_only  ? tr("Viewer_ReadOnly")  : "");
     draw_txt(font_header, title, 6, (head_h - cfg.font_size_header) / 2, cfg.theme.text);
 
     // Line/total right-aligned
@@ -323,10 +323,10 @@ void viewer_draw(void) {
         // Line number
         char lnum[12]; snprintf(lnum, sizeof(lnum), "%4d", li + 1);
         draw_txt(font_list, lnum, 4, ry + 2,
-                 li == tv.cur_line ? cfg.theme.marked : cfg.theme.text_disabled);
+                 li == tv.cur_line ? cfg.theme.highlight_text : cfg.theme.text_disabled);
 
         // Line text — offset by x_off for horizontal panning
-        SDL_Color tc = li == tv.cur_line ? cfg.theme.text : cfg.theme.text;
+        SDL_Color tc = li == tv.cur_line ? cfg.theme.highlight_text : cfg.theme.text;
         SDL_Rect clip = {text_x, ry, cfg.screen_w - text_x - 4, item_h};
         SDL_RenderSetClipRect(renderer, &clip);
         draw_txt(font_list, tv.lines[li], text_x - tv.x_off, ry + 2, tc);
@@ -341,11 +341,11 @@ void viewer_draw(void) {
 
     const char *hint;
     if (tv.read_only)
-        hint = "Up/Dn: Scroll   L1/R1: Page   B: Close";
+        hint = tr("Viewer_HintReadOnly");
     else if (tv.modified)
-        hint = "Up/Dn: Scroll   L1/R1: Page   A: Edit Line   Start: Save   B: Close";
+        hint = tr("Viewer_HintModified");
     else
-        hint = "Up/Dn: Scroll   L1/R1: Page   A: Edit Line   B: Close";
-    draw_txt(font_footer, hint, 8, cfg.screen_h - foot_h + (foot_h - cfg.font_size_footer) / 2,
-             cfg.theme.text_disabled);
+        hint = tr("Viewer_HintEdit");
+    draw_txt_clipped(font_footer, hint, 8, cfg.screen_h - foot_h + (foot_h - cfg.font_size_footer) / 2,
+             cfg.screen_w - 16, cfg.theme.text_disabled);
 }

@@ -337,7 +337,7 @@ void imgview_draw(void) {
 
     // ── Image area ────────────────────────────────────────────────────────────
     if (iv.load_failed || !iv.tex) {
-        const char *msg = iv.load_failed ? "Failed to load image" : "No image loaded";
+        const char *msg = iv.load_failed ? tr("ImgView_LoadFailed") : tr("ImgView_NoImage");
         int mw = 0;
         if (font_list) TTF_SizeText(font_list, msg, &mw, NULL);
         draw_txt(font_list, msg,
@@ -382,20 +382,14 @@ void imgview_draw(void) {
     const char *lb_fit     = btn_label(cfg.k_mark);
     const char *lb_close   = btn_label(cfg.k_back);
     if (iv.at_fit && iv.sibling_count > 1) {
-        snprintf(hint, sizeof(hint),
-                 "L1/R1: Prev/Next   %s: 1:1   %s: Fit   D-pad: Pan   %s: Close",
-                 lb_confirm, lb_fit, lb_close);
+        snprintf(hint, sizeof(hint), tr("ImgView_HintMulti"), lb_confirm, lb_fit, lb_close);
     } else if (iv.at_fit) {
-        snprintf(hint, sizeof(hint),
-                 "L1/R1: Zoom   %s: 1:1   %s: Fit   D-pad: Pan   %s: Close",
-                 lb_confirm, lb_fit, lb_close);
+        snprintf(hint, sizeof(hint), tr("ImgView_HintFit"), lb_confirm, lb_fit, lb_close);
     } else {
         int zoom_pct = (int)(iv.zoom * 100.0f + 0.5f);
-        snprintf(hint, sizeof(hint),
-                 "L1/R1: Zoom (%d%%)   %s: 1:1   %s: Fit   D-pad: Pan   %s: Close",
-                 zoom_pct, lb_confirm, lb_fit, lb_close);
+        snprintf(hint, sizeof(hint), tr("ImgView_HintZoom"), zoom_pct, lb_confirm, lb_fit, lb_close);
     }
-    draw_txt(font_footer, hint, 8,
+    draw_txt_clipped(font_footer, hint, 8,
              cfg.screen_h - foot_h + (foot_h - cfg.font_size_footer) / 2,
-             cfg.theme.text_disabled);
+             cfg.screen_w - 16, cfg.theme.text_disabled);
 }

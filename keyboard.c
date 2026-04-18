@@ -41,14 +41,14 @@ static const char osk_keys[OSK_LAYER_COUNT][OSK_CHAR_ROWS][OSK_COLS] = {
     },
 };
 
-static const char *osk_layer_labels[OSK_LAYER_COUNT] = { "abc", "ABC", "!@#" };
+static const char *osk_layer_labels[OSK_LAYER_COUNT] = { "OSK_Layer_Lower", "OSK_Layer_Upper", "OSK_Layer_Special" };
 
 // Action row (below the key grid): TAB | SPACE (wide) | ENTER
 #define OSK_ACT_COUNT  3
 #define OSK_ACT_TAB    0
 #define OSK_ACT_SPACE  1
 #define OSK_ACT_ENTER  2
-static const char *osk_act_labels[OSK_ACT_COUNT] = { "TAB", "SPACE", "ENTER" };
+static const char *osk_act_labels[OSK_ACT_COUNT] = { "OSK_Tab", "OSK_Space", "OSK_Enter" };
 
 // ---------------------------------------------------------------------------
 // Globals — extern-declared in vtree.h
@@ -328,16 +328,17 @@ void draw_osk(void) {
 
     // Title label — changes with OSK purpose
     const char *title_lbl =
-        (osk_purpose == OSK_FOR_RENAME)    ? "RENAME:"     :
-        (osk_purpose == OSK_FOR_NEW_FILE)  ? "NEW FILE:"   :
-        (osk_purpose == OSK_FOR_NEW_DIR)   ? "NEW FOLDER:" :
-                                             "EDIT LINE:";
+        (osk_purpose == OSK_FOR_RENAME)       ? tr("OSK_Title_Rename")    :
+        (osk_purpose == OSK_FOR_NEW_FILE)     ? tr("OSK_Title_NewFile")   :
+        (osk_purpose == OSK_FOR_NEW_DIR)      ? tr("OSK_Title_NewFolder") :
+        (osk_purpose == OSK_FOR_SETTINGS_PATH)? tr("OSK_Title_Settings")  :
+                                                tr("OSK_Title_EditLine");
     draw_txt(font_header, title_lbl, cx, y, cfg.theme.text);
 
     // Right side of title: layer indicator + INS/OVR badge
     {
-        const char *layer_lbl = osk_layer_labels[osk.layer];
-        const char *mode_tag  = osk.insert_mode ? "[INS]" : "[OVR]";
+        const char *layer_lbl = tr(osk_layer_labels[osk.layer]);
+        const char *mode_tag  = osk.insert_mode ? tr("OSK_Mode_Insert") : tr("OSK_Mode_Overwrite");
         SDL_Color   mode_col  = osk.insert_mode
             ? (SDL_Color){80, 200, 80, 255}
             : (SDL_Color){220, 100, 60, 255};
@@ -456,7 +457,7 @@ void draw_osk(void) {
                 if (font_menu) TTF_SizeText(font_menu, key, &tw, &th_k);
                 int kx = cx + c * cw_key + (cw_key - tw) / 2;
                 int ky = grid_y + r * ch  + (ch - th_k) / 2;
-                draw_txt(font_menu, key, kx, ky, sel ? cfg.theme.marked : cfg.theme.text);
+                draw_txt(font_menu, key, kx, ky, sel ? cfg.theme.highlight_text : cfg.theme.text);
             }
         }
         y = grid_y + grid_h;
@@ -481,12 +482,13 @@ void draw_osk(void) {
                                    cfg.theme.text_disabled.b, 255);
             SDL_RenderDrawRect(renderer, &ar);
             int lw = 0;
-            if (font_menu) TTF_SizeText(font_menu, osk_act_labels[c], &lw, NULL);
+            const char *act_lbl = tr(osk_act_labels[c]);
+            if (font_menu) TTF_SizeText(font_menu, act_lbl, &lw, NULL);
             int lx = act_x[c] + (act_w[c] - lw) / 2;
             int ly = y + (ach - cfg.font_size_menu) / 2;
-            SDL_Color lc = sel ? cfg.theme.marked
+            SDL_Color lc = sel ? cfg.theme.highlight_text
                         : (c == OSK_ACT_SPACE ? cfg.theme.text_disabled : cfg.theme.text);
-            draw_txt(font_menu, osk_act_labels[c], lx, ly, lc);
+            draw_txt(font_menu, act_lbl, lx, ly, lc);
         }
     }
 
@@ -498,22 +500,22 @@ void draw_osk(void) {
     SDL_Rect gfr = {0, gfoot_y, cfg.screen_w, gfoot_h};
     SDL_RenderFillRect(renderer, &gfr);
 
-    char hint[128];
-    const char *ins_state = osk.insert_mode ? "INS" : "OVR";
+    char hint[256];
+    const char *ins_state = osk.insert_mode ? tr("OSK_StateIns") : tr("OSK_StateOvr");
     if (osk.kb_visible)
-        snprintf(hint, sizeof(hint), "%s: Del   %s: Layer   L1/R1: Caret   %s: Hide   %s: %s",
+        snprintf(hint, sizeof(hint), tr("OSK_HintVisible"),
                  btn_label(cfg.osk_k_bksp),
                  btn_label(cfg.osk_k_shift),
                  btn_label(cfg.osk_k_toggle),
                  btn_label(cfg.osk_k_ins),
                  ins_state);
     else
-        snprintf(hint, sizeof(hint), "L1/R1: Caret   %s: Del   %s: Show   %s: %s   %s: OK",
+        snprintf(hint, sizeof(hint), tr("OSK_HintHidden"),
                  btn_label(cfg.osk_k_bksp),
                  btn_label(cfg.osk_k_toggle),
                  btn_label(cfg.osk_k_ins),
                  ins_state,
                  btn_label(cfg.osk_k_type));
-    draw_txt(font_footer, hint, 12, gfoot_y + (gfoot_h - cfg.font_size_footer) / 2,
-             cfg.theme.text_disabled);
+    draw_txt_clipped(font_footer, hint, 12, gfoot_y + (gfoot_h - cfg.font_size_footer) / 2,
+             cfg.screen_w - 24, cfg.theme.text_disabled);
 }
