@@ -993,9 +993,12 @@ static void draw_settings() {
     // Footer
     SDL_SetRenderDrawColor(renderer, cfg.theme.header_bg.r, cfg.theme.header_bg.g, cfg.theme.header_bg.b, 255);
     SDL_Rect fr = {0, cfg.screen_h - fh, cfg.screen_w, fh}; SDL_RenderFillRect(renderer, &fr);
-    const char *hint = settings_listening
-        ? tr("Settings_HintBinding")
-        : tr("Settings_HintNormal");
+    char hint[256];
+    if (settings_listening)
+        snprintf(hint, sizeof(hint), tr("Settings_HintBinding"), btn_label(cfg.k_back));
+    else
+        snprintf(hint, sizeof(hint), tr("Settings_HintNormal"),
+                 btn_label(cfg.k_confirm), btn_label(cfg.k_pgup), btn_label(cfg.k_pgdn), btn_label(cfg.k_back));
     draw_txt_clipped(font_footer, hint, 12, cfg.screen_h - fh + 6, cfg.screen_w - 24, cfg.theme.text_disabled);
 
     // Save prompt modal

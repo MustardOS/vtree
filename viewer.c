@@ -316,7 +316,10 @@ static void tv_draw_menu(void) {
             cfg.theme.highlight_bg.b, 210);
         SDL_RenderFillRect(renderer, &pbg);
         SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
-        draw_txt_clipped(font_footer, tr("Viewer_MenuDeleteConfirm"),
+        char del_hint[128];
+        snprintf(del_hint, sizeof(del_hint), tr("Viewer_MenuDeleteConfirm"),
+                 btn_label(cfg.k_confirm), btn_label(cfg.k_back));
+        draw_txt_clipped(font_footer, del_hint,
                          mx + 10, py + (ph - cfg.font_size_footer) / 2,
                          mw - 20, cfg.theme.highlight_text);
     }
@@ -519,13 +522,17 @@ void viewer_draw(void) {
     SDL_Rect fr = {0, cfg.screen_h - foot_h, cfg.screen_w, foot_h};
     SDL_RenderFillRect(renderer, &fr);
 
-    const char *hint;
+    char hint[256];
+    const char *lbl_pgup = btn_label(cfg.k_pgup);
+    const char *lbl_pgdn = btn_label(cfg.k_pgdn);
+    const char *lbl_conf = btn_label(cfg.k_confirm);
+    const char *lbl_back = btn_label(cfg.k_back);
     if (tv.read_only)
-        hint = tr("Viewer_HintReadOnly");
+        snprintf(hint, sizeof(hint), tr("Viewer_HintReadOnly"), lbl_pgup, lbl_pgdn, lbl_back);
     else if (tv.modified)
-        hint = tr("Viewer_HintModified");
+        snprintf(hint, sizeof(hint), tr("Viewer_HintModified"), lbl_pgup, lbl_pgdn, lbl_conf, lbl_back);
     else
-        hint = tr("Viewer_HintEdit");
+        snprintf(hint, sizeof(hint), tr("Viewer_HintEdit"), lbl_pgup, lbl_pgdn, lbl_conf, lbl_back);
     draw_txt_clipped(font_footer, hint, 8, cfg.screen_h - foot_h + (foot_h - cfg.font_size_footer) / 2,
              cfg.screen_w - 16, cfg.theme.text_disabled);
 

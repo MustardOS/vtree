@@ -570,13 +570,19 @@ void hexview_draw(void) {
     char hint[256] = "";
     if (hv.mode == HVM_READ) {
         if (!hv.read_only)
-            snprintf(hint, sizeof(hint), "%s", tr("HexView_HintRead"));
+            snprintf(hint, sizeof(hint), tr("HexView_HintRead"),
+                     btn_label(cfg.k_pgup), btn_label(cfg.k_pgdn),
+                     btn_label(cfg.k_confirm), btn_label(cfg.k_mark), btn_label(cfg.k_back));
         else
-            snprintf(hint, sizeof(hint), "%s", tr("HexView_HintReadOnly"));
+            snprintf(hint, sizeof(hint), tr("HexView_HintReadOnly"),
+                     btn_label(cfg.k_pgup), btn_label(cfg.k_pgdn),
+                     btn_label(cfg.k_mark), btn_label(cfg.k_back));
     } else if (hv.mode == HVM_EDIT) {
-        snprintf(hint, sizeof(hint), tr("HexView_HintEdit"), hv.edit_buf);
+        snprintf(hint, sizeof(hint), tr("HexView_HintEdit"),
+                 hv.edit_buf, btn_label(cfg.k_confirm), btn_label(cfg.k_back));
     } else if (hv.mode == HVM_GOTO) {
-        snprintf(hint, sizeof(hint), tr("HexView_HintGoto"), hv.goto_addr);
+        snprintf(hint, sizeof(hint), tr("HexView_HintGoto"),
+                 hv.goto_addr, btn_label(cfg.k_confirm), btn_label(cfg.k_back));
     }
     draw_txt_clipped(font_footer, hint, 8,
              cfg.screen_h - foot_h + (foot_h - cfg.font_size_footer) / 2,

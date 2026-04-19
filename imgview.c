@@ -378,16 +378,18 @@ void imgview_draw(void) {
     SDL_RenderFillRect(renderer, &fr);
 
     char hint[256];
+    const char *lb_pgup    = btn_label(cfg.k_pgup);
+    const char *lb_pgdn    = btn_label(cfg.k_pgdn);
     const char *lb_confirm = btn_label(cfg.k_confirm);
     const char *lb_fit     = btn_label(cfg.k_mark);
     const char *lb_close   = btn_label(cfg.k_back);
     if (iv.at_fit && iv.sibling_count > 1) {
-        snprintf(hint, sizeof(hint), tr("ImgView_HintMulti"), lb_confirm, lb_fit, lb_close);
+        snprintf(hint, sizeof(hint), tr("ImgView_HintMulti"), lb_pgup, lb_pgdn, lb_confirm, lb_fit, lb_close);
     } else if (iv.at_fit) {
-        snprintf(hint, sizeof(hint), tr("ImgView_HintFit"), lb_confirm, lb_fit, lb_close);
+        snprintf(hint, sizeof(hint), tr("ImgView_HintFit"), lb_pgup, lb_pgdn, lb_confirm, lb_fit, lb_close);
     } else {
         int zoom_pct = (int)(iv.zoom * 100.0f + 0.5f);
-        snprintf(hint, sizeof(hint), tr("ImgView_HintZoom"), zoom_pct, lb_confirm, lb_fit, lb_close);
+        snprintf(hint, sizeof(hint), tr("ImgView_HintZoom"), lb_pgup, lb_pgdn, zoom_pct, lb_confirm, lb_fit, lb_close);
     }
     draw_txt_clipped(font_footer, hint, 8,
              cfg.screen_h - foot_h + (foot_h - cfg.font_size_footer) / 2,
