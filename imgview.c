@@ -7,17 +7,12 @@
 //
 // Controls (actual buttons depend on key bindings in config.ini):
 //   D-pad          pan image (when zoomed beyond fit)
-//   L1 / R1        zoom out / zoom in  (±25% steps, clamped 25%–800%)
+//   L1 / R1        previous / next image in directory
+//   Y              zoom in  (+25% per press, max 800%)
+//   X              zoom out (−25% per press, min 25%)
 //   k_confirm      toggle 1:1 (actual pixels) vs fit-to-screen
 //   k_mark         reset to fit-to-screen
-//   k_back/menu    close, return to explorer
-//
-// Next / previous image in the same directory:
-//   Left-stick left/right  — not available on all pads; instead we use
-//   shoulder buttons when AT fit zoom:
-//     When zoom == fit:  L1 = previous image,  R1 = next image
-//     When zoom != fit:  L1 = zoom out,        R1 = zoom in
-//   (Described in footer hint dynamically.)
+//   k_back         close, return to explorer
 // -----------------------------------------------------------------------------
 
 #include "vtree.h"
@@ -228,7 +223,7 @@ static void iv_nav_sibling(int delta) {
 void imgview_handle_button(SDL_GameControllerButton btn, Uint32 now) {
     (void)now;
 
-    if (btn == cfg.k_back || btn == cfg.k_menu) {
+    if (btn == cfg.k_back) {
         current_mode = MODE_EXPLORER;
         return;
     }
@@ -252,29 +247,33 @@ void imgview_handle_button(SDL_GameControllerButton btn, Uint32 now) {
         return;
     }
 
-    // L1 / R1 — zoom out / in when zoomed; prev / next image when at fit
+    // Y — zoom in
+    if (btn == SDL_CONTROLLER_BUTTON_Y) {
+        float nz = iv.zoom + IV_ZOOM_STEP;
+        if (nz > IV_ZOOM_MAX) nz = IV_ZOOM_MAX;
+        iv.zoom   = nz;
+        iv.at_fit = false;
+        iv_clamp_pan();
+        return;
+    }
+
+    // X — zoom out
+    if (btn == SDL_CONTROLLER_BUTTON_X) {
+        float nz = iv.zoom - IV_ZOOM_STEP;
+        if (nz < IV_ZOOM_MIN) nz = IV_ZOOM_MIN;
+        iv.zoom   = nz;
+        iv.at_fit = (iv.zoom == iv.fit_zoom);
+        iv_clamp_pan();
+        return;
+    }
+
+    // L1 / R1 — prev / next image
     if (btn == SDL_CONTROLLER_BUTTON_LEFTSHOULDER) {
-        if (iv.at_fit && iv.sibling_count > 1) {
-            iv_nav_sibling(-1);
-        } else {
-            float nz = iv.zoom - IV_ZOOM_STEP;
-            if (nz < IV_ZOOM_MIN) nz = IV_ZOOM_MIN;
-            iv.zoom   = nz;
-            iv.at_fit = (iv.zoom == iv.fit_zoom);
-            iv_clamp_pan();
-        }
+        if (iv.sibling_count > 1) iv_nav_sibling(-1);
         return;
     }
     if (btn == SDL_CONTROLLER_BUTTON_RIGHTSHOULDER) {
-        if (iv.at_fit && iv.sibling_count > 1) {
-            iv_nav_sibling(+1);
-        } else {
-            float nz = iv.zoom + IV_ZOOM_STEP;
-            if (nz > IV_ZOOM_MAX) nz = IV_ZOOM_MAX;
-            iv.zoom   = nz;
-            iv.at_fit = false;
-            iv_clamp_pan();
-        }
+        if (iv.sibling_count > 1) iv_nav_sibling(+1);
         return;
     }
 
@@ -282,10 +281,13 @@ void imgview_handle_button(SDL_GameControllerButton btn, Uint32 now) {
     int step = (int)((float)IV_PAN_STEP / iv.zoom);
     if (step < 4) step = 4;
 
-    if (btn == SDL_CONTROLLER_BUTTON_DPAD_UP)    { iv.pan_y += step; iv.at_fit = false; iv_clamp_pan(); }
-    if (btn == SDL_CONTROLLER_BUTTON_DPAD_DOWN)  { iv.pan_y -= step; iv.at_fit = false; iv_clamp_pan(); }
-    if (btn == SDL_CONTROLLER_BUTTON_DPAD_LEFT)  { iv.pan_x += step; iv.at_fit = false; iv_clamp_pan(); }
-    if (btn == SDL_CONTROLLER_BUTTON_DPAD_RIGHT) { iv.pan_x -= step; iv.at_fit = false; iv_clamp_pan(); }
+    int old_x = iv.pan_x, old_y = iv.pan_y;
+    if (btn == SDL_CONTROLLER_BUTTON_DPAD_UP)    iv.pan_y += step;
+    if (btn == SDL_CONTROLLER_BUTTON_DPAD_DOWN)  iv.pan_y -= step;
+    if (btn == SDL_CONTROLLER_BUTTON_DPAD_LEFT)  iv.pan_x += step;
+    if (btn == SDL_CONTROLLER_BUTTON_DPAD_RIGHT) iv.pan_x -= step;
+    iv_clamp_pan();
+    if (iv.pan_x != old_x || iv.pan_y != old_y) iv.at_fit = false;
 }
 
 // ---------------------------------------------------------------------------
@@ -378,18 +380,20 @@ void imgview_draw(void) {
     SDL_RenderFillRect(renderer, &fr);
 
     char hint[256];
-    const char *lb_pgup    = btn_label(cfg.k_pgup);
-    const char *lb_pgdn    = btn_label(cfg.k_pgdn);
+    const char *lb_prev    = btn_label(cfg.k_pgup);
+    const char *lb_next    = btn_label(cfg.k_pgdn);
+    const char *lb_zoomin  = btn_label(SDL_CONTROLLER_BUTTON_Y);
+    const char *lb_zoomout = btn_label(SDL_CONTROLLER_BUTTON_X);
     const char *lb_confirm = btn_label(cfg.k_confirm);
     const char *lb_fit     = btn_label(cfg.k_mark);
     const char *lb_close   = btn_label(cfg.k_back);
     if (iv.at_fit && iv.sibling_count > 1) {
-        snprintf(hint, sizeof(hint), tr("ImgView_HintMulti"), lb_pgup, lb_pgdn, lb_confirm, lb_fit, lb_close);
+        snprintf(hint, sizeof(hint), tr("ImgView_HintMulti"), lb_prev, lb_next, lb_zoomin, lb_zoomout, lb_confirm, lb_fit, lb_close);
     } else if (iv.at_fit) {
-        snprintf(hint, sizeof(hint), tr("ImgView_HintFit"), lb_pgup, lb_pgdn, lb_confirm, lb_fit, lb_close);
+        snprintf(hint, sizeof(hint), tr("ImgView_HintFit"), lb_zoomin, lb_zoomout, lb_confirm, lb_fit, lb_close);
     } else {
         int zoom_pct = (int)(iv.zoom * 100.0f + 0.5f);
-        snprintf(hint, sizeof(hint), tr("ImgView_HintZoom"), lb_pgup, lb_pgdn, zoom_pct, lb_confirm, lb_fit, lb_close);
+        snprintf(hint, sizeof(hint), tr("ImgView_HintZoom"), lb_prev, lb_next, lb_zoomin, lb_zoomout, zoom_pct, lb_confirm, lb_fit, lb_close);
     }
     draw_txt_clipped(font_footer, hint, 8,
              cfg.screen_h - foot_h + (foot_h - cfg.font_size_footer) / 2,

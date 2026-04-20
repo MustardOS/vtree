@@ -300,7 +300,7 @@ void hexview_handle_button(SDL_GameControllerButton btn,
     if (sz < 1) sz = 1;
 
     if (hv.mode == HVM_READ) {
-        if (btn == cfg.k_back || btn == cfg.k_menu) {
+        if (btn == cfg.k_back) {
             current_mode = MODE_EXPLORER; return;
         }
         if (btn == SDL_CONTROLLER_BUTTON_START) {

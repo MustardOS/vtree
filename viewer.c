@@ -386,11 +386,6 @@ void viewer_handle_button(SDL_GameControllerButton btn,
         tv_confirm_del = false;
         return;
     }
-    // k_menu on read-only still closes (original behaviour)
-    if (btn == cfg.k_menu) {
-        current_mode = MODE_EXPLORER;
-        return;
-    }
 
     if (btn == SDL_CONTROLLER_BUTTON_START) {
         if (tv.modified && !tv.read_only) {
