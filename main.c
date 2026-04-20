@@ -682,9 +682,9 @@ static void reload_fonts() {
               cfg.font_size_footer, cfg.font_size_menu, cfg.font_size_hex);
 }
 
-// Shorten a path to fit within max_w pixels by stripping leading components
-// and prefixing each stripped component with "../".
-// Result written into out (size out_size). Falls back to as-short-as-possible.
+// Shorten a path to fit within max_w pixels. First strips leading components
+// replacing each with "../"; if still too wide, sheds those prefixes too.
+// Result written into out (size out_size). Falls back to bare filename.
 static void shorten_path(const char *path, char *out, size_t out_size,
                          TTF_Font *font, int max_w) {
     if (!font) { strncpy(out, path, out_size - 1); out[out_size - 1] = '\0'; return; }
@@ -718,15 +718,20 @@ static void shorten_path(const char *path, char *out, size_t out_size,
         if (pw <= max_w) { strncpy(out, candidate, out_size - 1); out[out_size - 1] = '\0'; return; }
     }
 
-    // Nothing fits — return shortest candidate (caller clips visually)
-    char candidate[MAX_PATH * 2];
-    int off = 0;
-    for (int i = 0; i < stripped && off < (int)sizeof(candidate) - 4; i++) {
-        candidate[off++] = '.'; candidate[off++] = '.'; candidate[off++] = '/';
+    // Nothing fits with all ../ prefixes — shed them one at a time
+    for (int s = stripped; s >= 0; s--) {
+        char candidate[MAX_PATH * 2];
+        int off = 0;
+        for (int i = 0; i < s && off < (int)sizeof(candidate) - 4; i++) {
+            candidate[off++] = '.'; candidate[off++] = '.'; candidate[off++] = '/';
+        }
+        strncpy(candidate + off, cur, sizeof(candidate) - (size_t)off - 1);
+        candidate[sizeof(candidate) - 1] = '\0';
+        TTF_SizeUTF8(font, candidate, &pw, NULL);
+        if (pw <= max_w) { strncpy(out, candidate, out_size - 1); out[out_size - 1] = '\0'; return; }
     }
-    strncpy(candidate + off, cur, sizeof(candidate) - (size_t)off - 1);
-    candidate[sizeof(candidate) - 1] = '\0';
-    strncpy(out, candidate, out_size - 1); out[out_size - 1] = '\0';
+    // Even bare filename doesn't fit — return it anyway (caller clips)
+    strncpy(out, cur, out_size - 1); out[out_size - 1] = '\0';
 }
 
 // ---------------------------------------------------------------------------
