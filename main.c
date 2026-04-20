@@ -386,18 +386,21 @@ static void show_fileinfo(const char *path) {
 
 static void show_fileinfo_multi(void) {
     fileinfo_line_count = 0;
-    AppState *s = &panes[choose_pane];
 
     int total = 0, nfiles = 0, ndirs = 0, nlinks = 0;
     long long total_size = 0;
-    for (int i = 0; i < s->file_count; i++) {
-        if (!s->files[i].marked) continue;
-        total++;
-        if      (s->files[i].is_dir)  ndirs++;
-        else if (s->files[i].is_link) nlinks++;
-        else                          nfiles++;
-        char fp[MAX_PATH]; join_path(fp, s->current_path, s->files[i].name);
-        total_size += s->files[i].is_dir ? calc_dir_size(fp) : s->files[i].size;
+    int np = cfg.single_pane ? 1 : 2;
+    for (int p = 0; p < np; p++) {
+        AppState *s = &panes[p];
+        for (int i = 0; i < s->file_count; i++) {
+            if (!s->files[i].marked) continue;
+            total++;
+            if      (s->files[i].is_dir)  ndirs++;
+            else if (s->files[i].is_link) nlinks++;
+            else                          nfiles++;
+            char fp[MAX_PATH]; join_path(fp, s->current_path, s->files[i].name);
+            total_size += s->files[i].is_dir ? calc_dir_size(fp) : s->files[i].size;
+        }
     }
 
     snprintf(fileinfo_lines[fileinfo_line_count++], 256, tr("FileInfo_ItemsSelected"),
@@ -1438,9 +1441,10 @@ static void open_file(const char *path, const char *name) {
     fileinfo_active  = false;
     choose_pane      = active_pane;
     choose_marked    = 0;
-    AppState *cs = &panes[active_pane];
-    for (int i = 0; i < cs->file_count; i++)
-        if (cs->files[i].marked) choose_marked++;
+    int _cp = cfg.single_pane ? 1 : 2;
+    for (int _p = 0; _p < _cp; _p++)
+        for (int i = 0; i < panes[_p].file_count; i++)
+            if (panes[_p].files[i].marked) choose_marked++;
     current_mode     = MODE_VIEW_CHOOSE;
 }
 
@@ -2394,14 +2398,19 @@ int main(int argc, char *argv[]) {
                         else if (act == ACT_INFO) {
                             current_mode = MODE_EXPLORER;
                             if (choose_marked == 1) {
-                                // single marked item — show individual info
-                                AppState *cs = &panes[choose_pane];
-                                for (int i = 0; i < cs->file_count; i++) {
-                                    if (cs->files[i].marked) {
-                                        char fp[MAX_PATH];
-                                        join_path(fp, cs->current_path, cs->files[i].name);
-                                        show_fileinfo(fp); break;
+                                // single marked item — search both panes
+                                int _np = cfg.single_pane ? 1 : 2;
+                                for (int _p = 0; _p < _np; _p++) {
+                                    AppState *cs = &panes[_p];
+                                    bool found = false;
+                                    for (int i = 0; i < cs->file_count; i++) {
+                                        if (cs->files[i].marked) {
+                                            char fp[MAX_PATH];
+                                            join_path(fp, cs->current_path, cs->files[i].name);
+                                            show_fileinfo(fp); found = true; break;
+                                        }
                                     }
+                                    if (found) break;
                                 }
                             } else if (choose_marked > 1) {
                                 show_fileinfo_multi();
