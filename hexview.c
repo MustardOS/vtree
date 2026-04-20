@@ -21,9 +21,9 @@
 //   B / Menu           close, return to explorer
 //
 // EDIT mode:
-//   Up/Dn   +1 / -1 to edit buffer nibble-by-nibble
-//   Left     shift buffer left (×16)
-//   Right    shift buffer right (÷16)
+//   Up/Dn   +1 / -1  (ones place)
+//   Left     -16      (sixteens place)
+//   Right    +16      (sixteens place)
 //   A        write buffer byte at cursor, exit edit mode
 //   B        cancel edit
 //
@@ -343,10 +343,10 @@ void hexview_handle_button(SDL_GameControllerButton btn,
             if (hv.data) hv.data[hv.cursor] = (unsigned char)hv.edit_buf;
             hv.modified = true; hv.mode = HVM_READ; return;
         }
-        if (btn == SDL_CONTROLLER_BUTTON_DPAD_UP)    { hv.edit_buf++; if (hv.edit_buf > 0xFF) hv.edit_buf = 0xFF; return; }
-        if (btn == SDL_CONTROLLER_BUTTON_DPAD_DOWN)  { hv.edit_buf--; if (hv.edit_buf < 0)    hv.edit_buf = 0;    return; }
-        if (btn == SDL_CONTROLLER_BUTTON_DPAD_LEFT)  { hv.edit_buf = SDL_min(hv.edit_buf * 16, 0xFF); return; }
-        if (btn == SDL_CONTROLLER_BUTTON_DPAD_RIGHT) { hv.edit_buf = hv.edit_buf / 16; return; }
+        if (btn == SDL_CONTROLLER_BUTTON_DPAD_UP)    { hv.edit_buf++;      if (hv.edit_buf > 0xFF) hv.edit_buf = 0xFF; return; }
+        if (btn == SDL_CONTROLLER_BUTTON_DPAD_DOWN)  { hv.edit_buf--;      if (hv.edit_buf < 0)    hv.edit_buf = 0;    return; }
+        if (btn == SDL_CONTROLLER_BUTTON_DPAD_LEFT)  { hv.edit_buf -= 16;  if (hv.edit_buf < 0)    hv.edit_buf = 0;    return; }
+        if (btn == SDL_CONTROLLER_BUTTON_DPAD_RIGHT) { hv.edit_buf += 16;  if (hv.edit_buf > 0xFF) hv.edit_buf = 0xFF; return; }
     }
     else if (hv.mode == HVM_GOTO) {
         if (btn == cfg.k_back) { hv.mode = HVM_READ; return; }
