@@ -1965,7 +1965,13 @@ int main(int argc, char *argv[]) {
                         for (int i = 0; i < s->file_count; i++)
                             if (s->files[i].marked) { any_marked = true; break; }
                         if (any_marked) {
-                            for (int i = 0; i < s->file_count; i++) s->files[i].marked = false;
+                            int cleared_count = 0;
+                            for (int i = 0; i < s->file_count; i++)
+                                if (s->files[i].marked) { s->files[i].marked = false; cleared_count++; }
+                            snprintf(explorer_toast_msg, sizeof(explorer_toast_msg), tr("Marks_Cleared"), cleared_count);
+                            explorer_toast_until = SDL_GetTicks() + 1600;
+                            explorer_toast_tw    = 0;
+                            if (font_menu) TTF_SizeText(font_menu, explorer_toast_msg, &explorer_toast_tw, NULL);
                         } else {
                             char next[MAX_PATH];
                             char *last = strrchr(s->current_path, '/');
@@ -2582,6 +2588,24 @@ int main(int argc, char *argv[]) {
             snprintf(f_text, 256, tr("Footer_Pane"), active_pane+1, disp_index, disp_total, sel->name, sz);
         } else { snprintf(f_text, 256, tr("Footer_Empty"), active_pane+1); }
         draw_txt(font_footer, f_text, 12, cfg.screen_h - foot_h + (foot_h - cfg.font_size_footer) / 2, cfg.theme.text);
+        // Marked count badge — bottom-right of footer bar
+        {
+            int total_marked = 0;
+            int cp = cfg.single_pane ? 1 : 2;
+            for (int p = 0; p < cp; p++)
+                for (int i = 0; i < panes[p].file_count; i++)
+                    if (panes[p].files[i].marked) total_marked++;
+            if (total_marked > 0) {
+                char mk_text[32];
+                snprintf(mk_text, sizeof(mk_text), tr("Footer_Marked"), total_marked);
+                int mk_tw = 0;
+                if (font_footer) TTF_SizeUTF8(font_footer, mk_text, &mk_tw, NULL);
+                draw_txt(font_footer, mk_text,
+                         cfg.screen_w - mk_tw - 12,
+                         cfg.screen_h - foot_h + (foot_h - cfg.font_size_footer) / 2,
+                         cfg.theme.marked);
+            }
+        }
         // Clipboard badge — icon + count, floating above bottom-right corner
         if (clip.op != OP_NONE) {
             SDL_Texture *clip_icon = (clip.op == OP_CUT) ? tex_cut : tex_copy;
