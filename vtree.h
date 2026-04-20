@@ -7,7 +7,8 @@
 #include <stdbool.h>
 
 #define MAX_PATH           1024
-#define MAX_FILES          1000
+#define MAX_FILES          1000   // imgview sibling cap — do not remove
+#define FILES_INIT_CAP     512
 #define MAX_CLIPBOARD      100
 #define GLYPH_CACHE_SIZE   128
 #define THEME_PRESET_COUNT 1   // only the built-in Dark fallback lives in C now
@@ -44,7 +45,7 @@ extern OSKState   osk;
 extern OSKPurpose osk_purpose;
 
 typedef struct { char name[256]; bool is_dir; bool is_link; bool marked; long long size; } FileEntry;
-typedef struct { char current_path[MAX_PATH]; FileEntry files[MAX_FILES]; int file_count, selected_index, scroll_offset; } AppState;
+typedef struct { char current_path[MAX_PATH]; FileEntry *files; int file_capacity, file_count, selected_index, scroll_offset; } AppState;
 
 typedef struct {
     SDL_Color bg, alt_bg, header_bg, text, text_disabled, link, highlight_bg, highlight_text, marked;

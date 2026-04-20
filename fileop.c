@@ -57,6 +57,17 @@ void load_dir(int p_idx, const char* path) {
     if (!dir) { vtree_log("[load_dir] opendir FAILED: %s (errno %d: %s)\n", path, errno, strerror(errno)); return; }
 
     AppState* s = &panes[p_idx];
+
+    int cap = (s->file_capacity > 0) ? s->file_capacity : FILES_INIT_CAP;
+    FileEntry *buf = realloc(s->files, cap * sizeof(FileEntry));
+    if (!buf) {
+        vtree_log("[load_dir] alloc FAILED (cap=%d)\n", cap);
+        closedir(dir);
+        return;
+    }
+    s->files = buf;
+    s->file_capacity = cap;
+
     strncpy(s->current_path, path, MAX_PATH);
     s->file_count = 0; s->selected_index = 0; s->scroll_offset = 0;
 
@@ -67,9 +78,21 @@ void load_dir(int p_idx, const char* path) {
     }
 
     struct dirent* e;
-    while ((e = readdir(dir)) && s->file_count < MAX_FILES) {
+    while ((e = readdir(dir))) {
         if (strcmp(e->d_name, ".") == 0 || strcmp(e->d_name, "..") == 0) continue;
         if (!cfg.show_hidden && e->d_name[0] == '.') continue;
+
+        if (s->file_count >= s->file_capacity) {
+            int new_cap = s->file_capacity * 2;
+            FileEntry *grown = realloc(s->files, new_cap * sizeof(FileEntry));
+            if (!grown) {
+                vtree_log("[load_dir] realloc FAILED at %d entries, stopping here\n", s->file_count);
+                break;
+            }
+            s->files = grown;
+            s->file_capacity = new_cap;
+        }
+
         char full[MAX_PATH];
         join_path(full, path, e->d_name);
         struct stat lst, st;
