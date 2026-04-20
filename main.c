@@ -16,7 +16,7 @@
 // ---------------------------------------------------------------------------
 // Version
 // ---------------------------------------------------------------------------
-#define VTREE_VERSION "1.0"
+#define VTREE_VERSION "1.1"
 
 // ---------------------------------------------------------------------------
 // Globals
@@ -1625,6 +1625,15 @@ static void draw_paste_conflict(void) {
 // Rotation helper — blits the render_target to the physical screen rotated.
 // When render_target is NULL (no rotation) this is a plain SDL_RenderPresent.
 // ---------------------------------------------------------------------------
+static void select_entry_by_name(AppState *s, const char *name) {
+    for (int i = 0; i < s->file_count; i++) {
+        if (strcmp(s->files[i].name, name) == 0) {
+            s->selected_index = i;
+            return;
+        }
+    }
+}
+
 static void present_frame(void) {
     if (!render_target) {
         SDL_RenderPresent(renderer);
@@ -1949,11 +1958,17 @@ int main(int argc, char *argv[]) {
                         } else if (fe->is_dir) {
                             char next[MAX_PATH];
                             if (strcmp(fe->name, "..") == 0) {
+                                char entered_dir[256] = "";
                                 char *last = strrchr(s->current_path, '/');
+                                if (last) strncpy(entered_dir, last + 1, sizeof(entered_dir) - 1);
                                 if (last == s->current_path) strcpy(next, "/");
                                 else { *last = '\0'; strcpy(next, s->current_path); }
-                            } else { join_path(next, s->current_path, fe->name); }
-                            load_dir(active_pane, next);
+                                load_dir(active_pane, next);
+                                if (entered_dir[0]) select_entry_by_name(s, entered_dir);
+                            } else {
+                                join_path(next, s->current_path, fe->name);
+                                load_dir(active_pane, next);
+                            }
                         } else {
                             char full[MAX_PATH];
                             join_path(full, s->current_path, fe->name);
@@ -1974,10 +1989,13 @@ int main(int argc, char *argv[]) {
                             if (font_menu) TTF_SizeText(font_menu, explorer_toast_msg, &explorer_toast_tw, NULL);
                         } else {
                             char next[MAX_PATH];
+                            char entered_dir[256] = "";
                             char *last = strrchr(s->current_path, '/');
+                            if (last) strncpy(entered_dir, last + 1, sizeof(entered_dir) - 1);
                             if (last == s->current_path) strcpy(next, "/");
                             else { *last = '\0'; strcpy(next, s->current_path); }
                             load_dir(active_pane, next);
+                            if (entered_dir[0]) select_entry_by_name(s, entered_dir);
                         }
                     }
 
