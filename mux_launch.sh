@@ -1,6 +1,6 @@
 #!/bin/sh
 # HELP: vTree Gold
-# ICON: dingux
+# ICON: vtree
 # GRID: vTree
 
 . /opt/muos/script/var/func.sh

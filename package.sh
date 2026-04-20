@@ -11,7 +11,7 @@ rm -rf "$FOLDER"
 mkdir -p "$FOLDER"
 
 cp vtree config.ini "$FOLDER/"
-cp -r res fonts lang theme "$FOLDER/"
+cp -r res fonts glyph lang theme "$FOLDER/"
 
 zip -r "${ARCHIVE}.zip" "$FOLDER"
 mv "${ARCHIVE}.zip" "${ARCHIVE}.muxapp"
