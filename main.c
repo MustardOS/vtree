@@ -2029,6 +2029,8 @@ int main(int argc, char *argv[]) {
                         // items that cannot operate on ".." when nothing else is marked
                         bool any_m = false;
                         for (int i = 0; i < s->file_count; i++) if (s->files[i].marked) { any_m = true; break; }
+                        if (!any_m && !cfg.single_pane)
+                            for (int i = 0; i < panes[1-active_pane].file_count; i++) if (panes[1-active_pane].files[i].marked) { any_m = true; break; }
                         bool dotdot_sel = (!any_m && s->file_count > 0 &&
                                           strcmp(s->files[s->selected_index].name, "..") == 0);
 #define DOTDOT_SKIP(sel) (dotdot_sel && ((sel)==FILEMENU_COPY||(sel)==FILEMENU_CUT|| \
@@ -2075,11 +2077,15 @@ int main(int argc, char *argv[]) {
                                 }
                                 clip.count = 0;
                                 clip.op = (filemenu_sel == FILEMENU_COPY) ? OP_COPY : OP_CUT;
-                                for (int i = 0; i < s->file_count; i++) {
-                                    if (s->files[i].marked && clip.count < MAX_CLIPBOARD) {
-                                        join_path(clip.src_paths[clip.count], s->current_path, s->files[i].name);
-                                        strcpy(clip.names[clip.count], s->files[i].name);
-                                        clip.count++; s->files[i].marked = false;
+                                int cp_panes = cfg.single_pane ? 1 : 2;
+                                for (int p = 0; p < cp_panes; p++) {
+                                    AppState *ps = &panes[p];
+                                    for (int i = 0; i < ps->file_count && clip.count < MAX_CLIPBOARD; i++) {
+                                        if (ps->files[i].marked) {
+                                            join_path(clip.src_paths[clip.count], ps->current_path, ps->files[i].name);
+                                            strcpy(clip.names[clip.count], ps->files[i].name);
+                                            clip.count++; ps->files[i].marked = false;
+                                        }
                                     }
                                 }
                                 if (clip.count == 0 && strcmp(s->files[s->selected_index].name, "..") != 0) {
@@ -2135,9 +2141,14 @@ int main(int argc, char *argv[]) {
                                 if (!delete_confirm_active) {
                                     delete_confirm_active = true;
                                 } else {
+                                    // Delete marked files from both panes; fall back to active pane cursor
                                     int deleted = 0;
-                                    for (int i = 0; i < s->file_count; i++) {
-                                        if (s->files[i].marked) { char t[MAX_PATH]; join_path(t, s->current_path, s->files[i].name); delete_path(t); deleted++; }
+                                    int pane_count = cfg.single_pane ? 1 : 2;
+                                    for (int p = 0; p < pane_count; p++) {
+                                        AppState *ps = &panes[p];
+                                        for (int i = 0; i < ps->file_count; i++) {
+                                            if (ps->files[i].marked) { char t[MAX_PATH]; join_path(t, ps->current_path, ps->files[i].name); delete_path(t); deleted++; }
+                                        }
                                     }
                                     if (deleted == 0 && strcmp(s->files[s->selected_index].name, "..") != 0) { char t[MAX_PATH]; join_path(t, s->current_path, s->files[s->selected_index].name); delete_path(t); }
                                     load_dir(0, panes[0].current_path); load_dir(1, panes[1].current_path);
