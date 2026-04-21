@@ -169,9 +169,15 @@ static void play_tone(int f0, int f1, int ms, float vol) {
     free(buf);
 }
 
-static void sound_eat(void)   { play_tone(440, 880, 70,  0.25f); }
-static void sound_die(void)   { play_tone(440, 80,  350, 0.35f); }
-static void sound_score(void) { play_tone(660, 990, 120, 0.20f); } // new high score entry
+static void sound_eat(void)  { play_tone(440, 880, 70,  0.25f); }
+static void sound_die(void)  { play_tone(440, 80,  350, 0.35f); }
+
+static void sound_highscore(void) {
+    play_tone(523, 523, 80,  0.22f);  // C5
+    play_tone(659, 659, 80,  0.22f);  // E5
+    play_tone(784, 784, 80,  0.22f);  // G5
+    play_tone(784, 1047, 220, 0.28f); // G5 → C6 sweep
+}
 
 // ---------------------------------------------------------------------------
 // Game state
@@ -327,7 +333,7 @@ void snake_tick(Uint32 now) {
                 sn.entry_ci[0] = sn.entry_ci[1] = sn.entry_ci[2] = 0;
                 sn.entry[0] = sn.entry[1] = sn.entry[2] = SNAKE_CHARS[0];
                 sn.entry[3] = '\0';
-                sound_score();
+                sound_highscore();
             } else {
                 reset_game();
             }

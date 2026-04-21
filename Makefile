@@ -12,7 +12,7 @@
 CC      ?= gcc
 TARGET  := vtree
 
-SRCS    := main.c config.c fileop.c viewer.c hexview.c imgview.c keyboard.c snake.c lang.c
+SRCS    := main.c config.c fileop.c viewer.c hexview.c imgview.c keyboard.c snake.c lang.c ui_audio.c
 OBJS    := $(SRCS:.c=.o)
 
 SDL2_CFLAGS :=

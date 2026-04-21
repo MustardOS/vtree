@@ -227,6 +227,7 @@ void load_config() {
     cfg.exec_scripts  = false;
     cfg.single_pane   = false;
     cfg.tint_icons    = true;
+    cfg.ui_sounds     = true;
     cfg.rotation      = 0;
     strncpy(cfg.language_name, "English", sizeof(cfg.language_name) - 1);
     cfg.language_name[sizeof(cfg.language_name) - 1] = '\0';
@@ -330,6 +331,7 @@ void load_config() {
         else if (strcmp(k, "SinglePane")   == 0) cfg.single_pane   = (strcmp(v,"true")==0 || strcmp(v,"1")==0);
         else if (strcmp(k, "TwoMenuMode")  == 0) cfg.two_menu_mode = (strcmp(v,"true")==0 || strcmp(v,"1")==0);
         else if (strcmp(k, "TintIcons")    == 0) cfg.tint_icons    = (strcmp(v,"true")==0 || strcmp(v,"1")==0);
+        else if (strcmp(k, "UISounds")     == 0) cfg.ui_sounds     = (strcmp(v,"true")==0 || strcmp(v,"1")==0);
         else if (strcmp(k, "Rotation")     == 0) { int r = atoi(v); cfg.rotation = (r >= 0 && r <= 3) ? r : 0; }
         else if (strcmp(k, "Language")     == 0) strncpy(cfg.language_name, v, sizeof(cfg.language_name) - 1);
         // [Paths]
@@ -418,6 +420,7 @@ void save_config() {
     fprintf(f, "SinglePane=%s\n",   cfg.single_pane   ? "true" : "false");
     fprintf(f, "TwoMenuMode=%s\n", cfg.two_menu_mode ? "true" : "false");
     fprintf(f, "TintIcons=%s\n",    cfg.tint_icons    ? "true" : "false");
+    fprintf(f, "UISounds=%s\n",     cfg.ui_sounds     ? "true" : "false");
     fprintf(f, "Language=%s\n",    cfg.language_name);
 
     fprintf(f, "\n[Display]\n");

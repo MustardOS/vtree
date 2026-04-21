@@ -109,6 +109,7 @@ typedef struct {
     bool single_pane;    // show only one full-width pane instead of the split view
     bool two_menu_mode;  // k_menu goes to file-ops directly; k_menu2 opens system menu
     bool tint_icons;     // tint file-list icons to match their row's theme colour
+    bool ui_sounds;      // play subtle programmatic UI sounds
     int  rotation;       // display rotation: 0=none, 1=90°CW, 2=180°, 3=270°CW
     char language_name[64];  // display name of the active language (e.g. "English")
 } AppConfig;
@@ -214,6 +215,17 @@ void osk_cursor_left(void);
 void osk_cursor_right(void);
 void osk_confirm(void);
 void draw_osk(void);
+
+// ui_audio.c — UI sound effects
+void ui_audio_open(void);
+void ui_audio_close(void);
+void ui_sound_navigate(void);
+void ui_sound_confirm(void);
+void ui_sound_back(void);
+void ui_sound_mark(void);
+void ui_sound_tab(void);
+void ui_sound_osk_type(void);
+void ui_sound_osk_bksp(void);
 
 // snake.c — easter egg
 void snake_enter(void);

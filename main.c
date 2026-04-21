@@ -456,6 +456,7 @@ static SettingDef general_defs[] = {
     { "Settings_StartLeft",    STYPE_PATH,  NULL, NULL, NULL, cfg.start_left,               0, 0, 0, NULL },
     { "Settings_StartRight",   STYPE_PATH,  NULL, NULL, NULL, cfg.start_right,              0, 0, 0, NULL },
     { "Settings_ExecScripts",  STYPE_BOOL,  NULL, &cfg.exec_scripts,  NULL, NULL,           0, 0, 0, NULL },
+    { "Settings_UISounds",     STYPE_BOOL,  NULL, &cfg.ui_sounds,     NULL, NULL,           0, 0, 0, NULL },
     { "Settings_SaveConfig",   STYPE_ACTION,NULL, NULL, NULL, NULL,                         0, 0, 0, NULL },
     { "Settings_Close",        STYPE_ACTION,NULL, NULL, NULL, NULL,                         0, 0, 0, NULL },
 };
@@ -1727,6 +1728,7 @@ int main(int argc, char *argv[]) {
 
     load_config();
     if (cmdline_rotation >= 0) cfg.rotation = cmdline_rotation;  // CLI overrides config.ini
+    ui_audio_open();
     lang_init();
     scan_fonts();   // builds font_files[] and sets current_font_idx from cfg.font_path
 
@@ -1920,6 +1922,7 @@ int main(int argc, char *argv[]) {
                     } else if (btn == cfg.k_mark) {
                         if (strcmp(s->files[s->selected_index].name, "..") != 0) {
                             s->files[s->selected_index].marked = !s->files[s->selected_index].marked;
+                            ui_sound_mark();
                             // advance one row after marking to allow rapid multi-select
                             if (s->selected_index < s->file_count - 1) s->selected_index++;
                         }
@@ -1942,16 +1945,21 @@ int main(int argc, char *argv[]) {
                     } else if (btn == SDL_CONTROLLER_BUTTON_DPAD_UP) {
                         if (s->selected_index > 0) s->selected_index--;
                         else if (s->file_count > 0) s->selected_index = s->file_count - 1;
+                        ui_sound_navigate();
                         dpad_up_held = true; next_up_tick = now + REPEAT_DELAY;
                     } else if (btn == SDL_CONTROLLER_BUTTON_DPAD_DOWN) {
                         if (s->selected_index < s->file_count - 1) s->selected_index++;
                         else s->selected_index = 0;
+                        ui_sound_navigate();
                         dpad_down_held = true; next_down_tick = now + REPEAT_DELAY;
                     } else if (btn == SDL_CONTROLLER_BUTTON_DPAD_LEFT && !cfg.single_pane) {
+                        if (active_pane != 0) ui_sound_navigate();
                         active_pane = 0;
                     } else if (btn == SDL_CONTROLLER_BUTTON_DPAD_RIGHT && !cfg.single_pane) {
+                        if (active_pane != 1) ui_sound_navigate();
                         active_pane = 1;
                     } else if (btn == cfg.k_confirm) {
+                        ui_sound_confirm();
                         FileEntry *fe = &s->files[s->selected_index];
                         int num_marked = 0;
                         for (int i = 0; i < s->file_count; i++)
@@ -1980,6 +1988,7 @@ int main(int argc, char *argv[]) {
                             open_file(full, fe->name);
                         }
                     } else if (btn == cfg.k_back) {
+                        ui_sound_back();
                         // if any files are marked, first B press clears marks only
                         bool any_marked = false;
                         for (int i = 0; i < s->file_count; i++)
@@ -2083,6 +2092,7 @@ int main(int argc, char *argv[]) {
                                    DOTDOT_SKIP(filemenu_sel) || BACK_SKIP(filemenu_sel))
                                 filemenu_sel = (filemenu_sel - 1 + FILEMENU_MAX) % FILEMENU_MAX;
                             delete_confirm_active = false;
+                            ui_sound_navigate();
                             dpad_up_held = true; next_up_tick = now + REPEAT_DELAY;
                         } else if (btn == SDL_CONTROLLER_BUTTON_DPAD_DOWN) {
                             filemenu_sel = (filemenu_sel + 1) % FILEMENU_MAX;
@@ -2093,6 +2103,7 @@ int main(int argc, char *argv[]) {
                                    DOTDOT_SKIP(filemenu_sel) || BACK_SKIP(filemenu_sel))
                                 filemenu_sel = (filemenu_sel + 1) % FILEMENU_MAX;
                             delete_confirm_active = false;
+                            ui_sound_navigate();
                             dpad_down_held = true; next_down_tick = now + REPEAT_DELAY;
                         } else if (btn == cfg.k_confirm) {
                             if (filemenu_sel == FILEMENU_BACK) {
@@ -2208,9 +2219,11 @@ int main(int argc, char *argv[]) {
                             delete_confirm_active = false; paste_conflict_active = false;
                         } else if (btn == SDL_CONTROLLER_BUTTON_DPAD_UP) {
                             menu_selection = (menu_selection - 1 + top_count) % top_count;
+                            ui_sound_navigate();
                             dpad_up_held = true; next_up_tick = now + REPEAT_DELAY;
                         } else if (btn == SDL_CONTROLLER_BUTTON_DPAD_DOWN) {
                             menu_selection = (menu_selection + 1) % top_count;
+                            ui_sound_navigate();
                             dpad_down_held = true; next_down_tick = now + REPEAT_DELAY;
                         } else if (btn == cfg.k_confirm) {
                             int sel = menu_is_system ? sys_items[menu_selection] : menu_selection;
@@ -2294,28 +2307,34 @@ int main(int argc, char *argv[]) {
                     } else {
                         int tab_n; tab_defs(&tab_n);
                         if (btn == cfg.k_back) {
+                            ui_sound_back();
                             settings_try_close();
                         } else if (btn == SDL_CONTROLLER_BUTTON_LEFTSHOULDER) {
                             settings_tab_indices[settings_tab] = settings_index;
                             settings_tab = (settings_tab - 1 + SETTINGS_TAB_COUNT) % SETTINGS_TAB_COUNT;
                             tab_defs(&tab_n);
                             settings_index = SDL_clamp(settings_tab_indices[settings_tab], 0, tab_n - 1);
+                            ui_sound_tab();
                         } else if (btn == SDL_CONTROLLER_BUTTON_RIGHTSHOULDER) {
                             settings_tab_indices[settings_tab] = settings_index;
                             settings_tab = (settings_tab + 1) % SETTINGS_TAB_COUNT;
                             tab_defs(&tab_n);
                             settings_index = SDL_clamp(settings_tab_indices[settings_tab], 0, tab_n - 1);
+                            ui_sound_tab();
                         } else if (btn == SDL_CONTROLLER_BUTTON_DPAD_UP) {
                             settings_index = (settings_index - 1 + tab_n) % tab_n;
+                            ui_sound_navigate();
                             dpad_up_held = true; next_up_tick = now + REPEAT_DELAY;
                         } else if (btn == SDL_CONTROLLER_BUTTON_DPAD_DOWN) {
                             settings_index = (settings_index + 1) % tab_n;
+                            ui_sound_navigate();
                             dpad_down_held = true; next_down_tick = now + REPEAT_DELAY;
                         } else if (btn == SDL_CONTROLLER_BUTTON_DPAD_LEFT) {
                             settings_adjust(-1);
                         } else if (btn == SDL_CONTROLLER_BUTTON_DPAD_RIGHT) {
                             settings_adjust(+1);
                         } else if (btn == cfg.k_confirm) {
+                            ui_sound_confirm();
                             settings_confirm();
                         } else if (btn == SDL_CONTROLLER_BUTTON_Y) {
                             int tab_n2; SettingDef *defs2 = tab_defs(&tab_n2);
@@ -2347,6 +2366,7 @@ int main(int argc, char *argv[]) {
                         osk_purpose = OSK_FOR_RENAME;
 
                     } else if (btn == cfg.osk_k_type && !osk.kb_visible) {
+                        ui_sound_osk_type();
                         osk_confirm();
 
                     } else if (btn == cfg.osk_k_shift) {
@@ -2359,9 +2379,11 @@ int main(int argc, char *argv[]) {
                         osk.kb_visible = !osk.kb_visible;
 
                     } else if (btn == cfg.osk_k_type) {
+                        ui_sound_osk_type();
                         osk_press();
 
                     } else if (btn == cfg.osk_k_bksp) {
+                        ui_sound_osk_bksp();
                         osk_backspace();
                         osk_bksp_held = true; next_bksp_tick = now + REPEAT_DELAY;
 
@@ -2831,6 +2853,7 @@ int main(int argc, char *argv[]) {
     destroy_glyph_cache();
     if (render_target) SDL_DestroyTexture(render_target);
     SDL_DestroyRenderer(renderer); SDL_DestroyWindow(window);
+    ui_audio_close();
     IMG_Quit(); TTF_Quit(); SDL_Quit();
     vtree_log("Clean exit.\n");
     if (debug_log_file) { fclose(debug_log_file); debug_log_file = NULL; }
