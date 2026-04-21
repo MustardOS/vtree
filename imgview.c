@@ -382,8 +382,8 @@ void imgview_draw(void) {
     char hint[256];
     const char *lb_prev    = btn_label(cfg.k_pgup);
     const char *lb_next    = btn_label(cfg.k_pgdn);
-    const char *lb_zoomin  = btn_label(SDL_CONTROLLER_BUTTON_Y);
-    const char *lb_zoomout = btn_label(SDL_CONTROLLER_BUTTON_X);
+    const char *lb_zoomin  = btn_label(cfg.k_menu);              // Y by default; zoom in
+    const char *lb_zoomout = btn_label(SDL_CONTROLLER_BUTTON_X); // X; zoom out
     const char *lb_confirm = btn_label(cfg.k_confirm);
     const char *lb_fit     = btn_label(cfg.k_mark);
     const char *lb_close   = btn_label(cfg.k_back);

@@ -112,6 +112,15 @@ typedef struct {
     bool ui_sounds;      // play subtle programmatic UI sounds
     int  rotation;       // display rotation: 0=none, 1=90°CW, 2=180°, 3=270°CW
     char language_name[64];  // display name of the active language (e.g. "English")
+    // Keyboard input mode (--keyb flag): use SDL_KEYDOWN instead of gamepad events
+    bool keyboard_mode;
+    SDL_Keycode kbd_k_confirm, kbd_k_back, kbd_k_menu, kbd_k_mark;
+    SDL_Keycode kbd_k_pgup, kbd_k_pgdn, kbd_k_menu2;
+    SDL_Keycode kbd_k_x;      // maps to SDL_CONTROLLER_BUTTON_X (osk_bksp / imgview zoom-out)
+    SDL_Keycode kbd_k_start;  // maps to SDL_CONTROLLER_BUTTON_START (osk_ins)
+    char kbd_label_confirm[32], kbd_label_back[32], kbd_label_menu[32], kbd_label_mark[32];
+    char kbd_label_pgup[32],    kbd_label_pgdn[32],  kbd_label_menu2[32];
+    char kbd_label_x[32],       kbd_label_start[32];
 } AppConfig;
 
 typedef struct {

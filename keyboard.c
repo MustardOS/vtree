@@ -247,6 +247,26 @@ void osk_enter_new(const char *dir, bool is_dir) {
 // ---------------------------------------------------------------------------
 const char *btn_label(SDL_GameControllerButton btn) {
     if (btn == SDL_CONTROLLER_BUTTON_INVALID) return "---";
+
+    // In keyboard mode return the physical button label (or SDL key name as fallback).
+    // Checks are ordered by cfg logical fields so the label matches whichever action
+    // this button performs, not just its raw SDL name.
+    if (cfg.keyboard_mode) {
+        #define KBD_LABEL(field_btn, label_field, key_field) \
+            if (btn == (field_btn)) return (label_field)[0] ? (label_field) : SDL_GetKeyName(key_field)
+        KBD_LABEL(cfg.k_confirm,              cfg.kbd_label_confirm, cfg.kbd_k_confirm);
+        KBD_LABEL(cfg.k_back,                 cfg.kbd_label_back,    cfg.kbd_k_back);
+        KBD_LABEL(cfg.k_menu,                 cfg.kbd_label_menu,    cfg.kbd_k_menu);
+        KBD_LABEL(cfg.k_mark,                 cfg.kbd_label_mark,    cfg.kbd_k_mark);
+        KBD_LABEL(cfg.k_pgup,                 cfg.kbd_label_pgup,    cfg.kbd_k_pgup);
+        KBD_LABEL(cfg.k_pgdn,                 cfg.kbd_label_pgdn,    cfg.kbd_k_pgdn);
+        KBD_LABEL(cfg.k_menu2,                cfg.kbd_label_menu2,   cfg.kbd_k_menu2);
+        KBD_LABEL(SDL_CONTROLLER_BUTTON_X,    cfg.kbd_label_x,       cfg.kbd_k_x);
+        KBD_LABEL(SDL_CONTROLLER_BUTTON_START,cfg.kbd_label_start,   cfg.kbd_k_start);
+        #undef KBD_LABEL
+        return "?";
+    }
+
     const char *s = SDL_GameControllerGetStringForButton(btn);
     if (!s) return "?";
     if (strcmp(s, "a")             == 0) return "A";

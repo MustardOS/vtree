@@ -875,7 +875,7 @@ static void settings_confirm() {
         settings_adjust(1);  // toggle
     } else if (d->type == STYPE_CYCLE || d->type == STYPE_LANG) {
         settings_adjust(1);  // cycle forward
-    } else if (d->type == STYPE_KEYBIND && d->btn_ptr) {
+    } else if (d->type == STYPE_KEYBIND && d->btn_ptr && !cfg.keyboard_mode) {
         settings_listening     = true;
         settings_listen_target = d->btn_ptr;
     } else if (d->type == STYPE_PATH && d->str_ptr) {
@@ -948,9 +948,10 @@ static void draw_settings() {
             SDL_Rect row = {0, y-2, cfg.screen_w, ih}; SDL_RenderFillRect(renderer, &row);
         }
 
-        // Greyed label for path rows when RememberDirs is on
+        // Greyed label for path rows when RememberDirs is on, or keybind rows in keyboard mode
         bool greyed = (d->type == STYPE_PATH && cfg.remember_dirs) ||
-                      (d->btn_ptr == &pending_keys.k_menu2 && !cfg.two_menu_mode);
+                      (d->btn_ptr == &pending_keys.k_menu2 && !cfg.two_menu_mode) ||
+                      (d->type == STYPE_KEYBIND && cfg.keyboard_mode);
         SDL_Color lc = greyed ? cfg.theme.text_disabled
                               : (i == settings_index) ? cfg.theme.highlight_text : cfg.theme.text;
         draw_txt_clipped(font_list, tr(d->label), cl, y, cv - cl - 16, lc);
@@ -1665,9 +1666,32 @@ static void present_frame(void) {
 }
 
 // ---------------------------------------------------------------------------
+// Keyboard mode: translate SDL_Keycode → SDL_GameControllerButton so the rest
+// of the event loop (and all viewer handle_button functions) need no changes.
+// Returns SDL_CONTROLLER_BUTTON_INVALID if the key isn't bound.
+// ---------------------------------------------------------------------------
+static SDL_GameControllerButton logical_btn_from_keydown(SDL_Keycode k) {
+    if (k == cfg.kbd_k_confirm) return cfg.k_confirm;
+    if (k == cfg.kbd_k_back)    return cfg.k_back;
+    if (k == cfg.kbd_k_menu)    return cfg.k_menu;
+    if (k == cfg.kbd_k_mark)    return cfg.k_mark;
+    if (k == cfg.kbd_k_pgup)    return cfg.k_pgup;
+    if (k == cfg.kbd_k_pgdn)    return cfg.k_pgdn;
+    if (k == cfg.kbd_k_menu2)   return cfg.k_menu2;
+    if (k == cfg.kbd_k_x)       return SDL_CONTROLLER_BUTTON_X;
+    if (k == cfg.kbd_k_start)   return SDL_CONTROLLER_BUTTON_START;
+    if (k == SDLK_UP)           return SDL_CONTROLLER_BUTTON_DPAD_UP;
+    if (k == SDLK_DOWN)         return SDL_CONTROLLER_BUTTON_DPAD_DOWN;
+    if (k == SDLK_LEFT)         return SDL_CONTROLLER_BUTTON_DPAD_LEFT;
+    if (k == SDLK_RIGHT)        return SDL_CONTROLLER_BUTTON_DPAD_RIGHT;
+    return SDL_CONTROLLER_BUTTON_INVALID;
+}
+
+// ---------------------------------------------------------------------------
 int main(int argc, char *argv[]) {
     // ── Argument parsing ──────────────────────────────────────────────────────
-    int cmdline_rotation = -1;  // -1 = not set; overrides Rotation= in config.ini when >= 0
+    int  cmdline_rotation = -1;   // -1 = not set; overrides Rotation= in config.ini when >= 0
+    bool cmdline_keyb     = false;
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
             printf("vTree " VTREE_VERSION " — dual-pane file manager for gamepad devices\n\n");
@@ -1679,6 +1703,7 @@ int main(int argc, char *argv[]) {
             printf("  --logfile <file>         Write debug log to <file> (implies --debug)\n");
             printf("  --logfile=<file>         Same as above, alternative syntax\n");
             printf("  --rotate=<0-3>           Override display rotation: 0=none, 1=90 CW, 2=180, 3=270 CW\n");
+            printf("  --keyb                   Use keyboard input instead of gamepad (no gamecontrollerdb needed)\n");
             printf("\nFiles (loaded from the directory containing the vtree binary):\n");
             printf("  config.ini               Main configuration (keys, display, active theme)\n");
             printf("  theme.ini                Additional named theme presets\n");
@@ -1702,6 +1727,8 @@ int main(int argc, char *argv[]) {
             int r = atoi(argv[i] + 9);
             if (r >= 0 && r <= 3) cmdline_rotation = r;
             else { fprintf(stderr, "vtree: --rotate value must be 0-3\n"); return 1; }
+        } else if (strcmp(argv[i], "--keyb") == 0) {
+            cmdline_keyb = true;
         } else {
             fprintf(stderr, "vtree: unknown option '%s'\n", argv[i]);
             fprintf(stderr, "Try 'vtree --help' for usage.\n");
@@ -1727,7 +1754,8 @@ int main(int argc, char *argv[]) {
     }
 
     load_config();
-    if (cmdline_rotation >= 0) cfg.rotation = cmdline_rotation;  // CLI overrides config.ini
+    if (cmdline_rotation >= 0) cfg.rotation     = cmdline_rotation;
+    if (cmdline_keyb)          cfg.keyboard_mode = true;
     ui_audio_open();
     lang_init();
     scan_fonts();   // builds font_files[] and sets current_font_idx from cfg.font_path
@@ -1747,13 +1775,15 @@ int main(int argc, char *argv[]) {
             vtree_log("  [%d] %s%s\n", i, font_files[i], i == current_font_idx ? "  <active>" : "");
     }
 
-    // Load gamecontrollerdb — prefer path from config, fall back to CWD default
-    {
+    // Load gamecontrollerdb — skipped in keyboard mode
+    if (!cfg.keyboard_mode) {
         const char *db = cfg.gamecontrollerdb[0] ? cfg.gamecontrollerdb : "gamecontrollerdb.txt";
         if (SDL_GameControllerAddMappingsFromFile(db) >= 0)
             vtree_log("Gamecontrollerdb loaded: %s\n", db);
         else
             vtree_log("Gamecontrollerdb not found: %s\n", db);
+    } else {
+        vtree_log("Keyboard mode: gamecontrollerdb skipped\n");
     }
 
     // At this point cfg.screen_w/h are physical (auto-detected or explicitly set as physical).
@@ -1826,17 +1856,21 @@ int main(int argc, char *argv[]) {
               tex_missing ? " (see MISSING lines above)" : "");
 
     pad = NULL;
-    int nj = SDL_NumJoysticks();
-    vtree_log("Joysticks found: %d\n", nj);
-    for (int i = 0; i < nj; ++i) {
-        if (SDL_IsGameController(i)) {
-            pad = SDL_GameControllerOpen(i);
-            if (pad) vtree_log("Gamepad opened: %s\n", SDL_GameControllerName(pad));
-            else     vtree_log("Gamepad open FAILED (joystick %d)\n", i);
-            break;
+    if (!cfg.keyboard_mode) {
+        int nj = SDL_NumJoysticks();
+        vtree_log("Joysticks found: %d\n", nj);
+        for (int i = 0; i < nj; ++i) {
+            if (SDL_IsGameController(i)) {
+                pad = SDL_GameControllerOpen(i);
+                if (pad) vtree_log("Gamepad opened: %s\n", SDL_GameControllerName(pad));
+                else     vtree_log("Gamepad open FAILED (joystick %d)\n", i);
+                break;
+            }
         }
+        if (!pad) vtree_log("No gamepad found — keyboard/touch only\n");
+    } else {
+        vtree_log("Keyboard mode: gamepad init skipped\n");
     }
-    if (!pad) vtree_log("No gamepad found — keyboard/touch only\n");
 
     load_dir(0, cfg.start_left);
     load_dir(1, cfg.start_right);
@@ -1886,6 +1920,22 @@ int main(int argc, char *argv[]) {
                 if (b == SDL_CONTROLLER_BUTTON_LEFTSHOULDER)  osk_cur_l_held  = false;
                 if (b == SDL_CONTROLLER_BUTTON_RIGHTSHOULDER) osk_cur_r_held  = false;
                 // R1 release on about screen: dismiss if combo wasn't triggered
+                if (b == SDL_CONTROLLER_BUTTON_RIGHTSHOULDER && about_active) {
+                    if (!about_combo_fired) about_active = false;
+                    about_r1_held = about_dpad_up_held = about_combo_fired = false;
+                }
+            }
+
+            // Keyboard mode: translate key-up into button-up hold-flag clears
+            if (cfg.keyboard_mode && ev.type == SDL_KEYUP) {
+                SDL_GameControllerButton b = logical_btn_from_keydown(ev.key.keysym.sym);
+                if (b == SDL_CONTROLLER_BUTTON_DPAD_UP)       dpad_up_held    = false;
+                if (b == SDL_CONTROLLER_BUTTON_DPAD_DOWN)     dpad_down_held  = false;
+                if (b == SDL_CONTROLLER_BUTTON_DPAD_LEFT)     dpad_left_held  = false;
+                if (b == SDL_CONTROLLER_BUTTON_DPAD_RIGHT)    dpad_right_held = false;
+                if (b == cfg.osk_k_bksp)                      osk_bksp_held   = false;
+                if (b == SDL_CONTROLLER_BUTTON_LEFTSHOULDER)  osk_cur_l_held  = false;
+                if (b == SDL_CONTROLLER_BUTTON_RIGHTSHOULDER) osk_cur_r_held  = false;
                 if (b == SDL_CONTROLLER_BUTTON_RIGHTSHOULDER && about_active) {
                     if (!about_combo_fired) about_active = false;
                     about_r1_held = about_dpad_up_held = about_combo_fired = false;
@@ -2478,6 +2528,19 @@ int main(int argc, char *argv[]) {
                     if (btn == SDL_CONTROLLER_BUTTON_DPAD_DOWN)  { dpad_down_held  = true; next_down_tick  = now + REPEAT_DELAY; }
                     if (btn == SDL_CONTROLLER_BUTTON_DPAD_LEFT)  { dpad_left_held  = true; next_left_tick  = now + REPEAT_DELAY; }
                     if (btn == SDL_CONTROLLER_BUTTON_DPAD_RIGHT) { dpad_right_held = true; next_right_tick = now + REPEAT_DELAY; }
+                }
+            }
+
+            // Keyboard mode: translate SDL_KEYDOWN to a synthetic SDL_CONTROLLERBUTTONDOWN
+            // so all existing mode dispatch code handles it without modification.
+            if (cfg.keyboard_mode && ev.type == SDL_KEYDOWN && !ev.key.repeat) {
+                SDL_GameControllerButton b = logical_btn_from_keydown(ev.key.keysym.sym);
+                if (b != SDL_CONTROLLER_BUTTON_INVALID) {
+                    SDL_Event fake;
+                    SDL_memset(&fake, 0, sizeof(fake));
+                    fake.type          = SDL_CONTROLLERBUTTONDOWN;
+                    fake.cbutton.button = (Uint8)b;
+                    SDL_PushEvent(&fake);
                 }
             }
         }

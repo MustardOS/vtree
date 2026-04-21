@@ -253,6 +253,27 @@ void load_config() {
     cfg.osk_k_toggle = SDL_CONTROLLER_BUTTON_BACK;
     cfg.osk_k_ins    = SDL_CONTROLLER_BUTTON_START;
 
+    // Keyboard mode defaults
+    cfg.keyboard_mode  = false;
+    cfg.kbd_k_confirm  = SDLK_RETURN;
+    cfg.kbd_k_back     = SDLK_ESCAPE;
+    cfg.kbd_k_menu     = SDLK_m;
+    cfg.kbd_k_mark     = SDLK_TAB;
+    cfg.kbd_k_pgup     = SDLK_PAGEUP;
+    cfg.kbd_k_pgdn     = SDLK_PAGEDOWN;
+    cfg.kbd_k_menu2    = SDLK_F1;
+    cfg.kbd_k_x        = SDLK_BACKSPACE;
+    cfg.kbd_k_start    = SDLK_INSERT;
+    strncpy(cfg.kbd_label_confirm, "A",     sizeof(cfg.kbd_label_confirm) - 1);
+    strncpy(cfg.kbd_label_back,    "B",     sizeof(cfg.kbd_label_back)    - 1);
+    strncpy(cfg.kbd_label_menu,    "Y",     sizeof(cfg.kbd_label_menu)    - 1);
+    strncpy(cfg.kbd_label_mark,    "Select",sizeof(cfg.kbd_label_mark)    - 1);
+    strncpy(cfg.kbd_label_pgup,    "L1",    sizeof(cfg.kbd_label_pgup)    - 1);
+    strncpy(cfg.kbd_label_pgdn,    "R1",    sizeof(cfg.kbd_label_pgdn)    - 1);
+    strncpy(cfg.kbd_label_menu2,   "Guide", sizeof(cfg.kbd_label_menu2)   - 1);
+    strncpy(cfg.kbd_label_x,       "X",     sizeof(cfg.kbd_label_x)       - 1);
+    strncpy(cfg.kbd_label_start,   "Start", sizeof(cfg.kbd_label_start)   - 1);
+
     // ── Locate config file ────────────────────────────────────────────────────
     char config_path[MAX_PATH];
     get_config_path(config_path);
@@ -353,6 +374,25 @@ void load_config() {
         else if (strcmp(k, "OskKeyCancel") == 0) cfg.osk_k_cancel = SDL_GameControllerGetButtonFromString(v);
         else if (strcmp(k, "OskKeyToggle") == 0) cfg.osk_k_toggle = SDL_GameControllerGetButtonFromString(v);
         else if (strcmp(k, "OskKeyIns")    == 0) cfg.osk_k_ins    = SDL_GameControllerGetButtonFromString(v);
+        // [KbdKeys] — keyboard mode bindings
+        else if (strcmp(k, "KbdConfirm")  == 0) { SDL_Keycode kc = SDL_GetKeyFromName(v); if (kc != SDLK_UNKNOWN) cfg.kbd_k_confirm = kc; }
+        else if (strcmp(k, "KbdBack")     == 0) { SDL_Keycode kc = SDL_GetKeyFromName(v); if (kc != SDLK_UNKNOWN) cfg.kbd_k_back    = kc; }
+        else if (strcmp(k, "KbdMenu")     == 0) { SDL_Keycode kc = SDL_GetKeyFromName(v); if (kc != SDLK_UNKNOWN) cfg.kbd_k_menu    = kc; }
+        else if (strcmp(k, "KbdMark")     == 0) { SDL_Keycode kc = SDL_GetKeyFromName(v); if (kc != SDLK_UNKNOWN) cfg.kbd_k_mark    = kc; }
+        else if (strcmp(k, "KbdPgUp")     == 0) { SDL_Keycode kc = SDL_GetKeyFromName(v); if (kc != SDLK_UNKNOWN) cfg.kbd_k_pgup    = kc; }
+        else if (strcmp(k, "KbdPgDn")     == 0) { SDL_Keycode kc = SDL_GetKeyFromName(v); if (kc != SDLK_UNKNOWN) cfg.kbd_k_pgdn    = kc; }
+        else if (strcmp(k, "KbdMenu2")    == 0) { SDL_Keycode kc = SDL_GetKeyFromName(v); if (kc != SDLK_UNKNOWN) cfg.kbd_k_menu2   = kc; }
+        else if (strcmp(k, "KbdX")        == 0) { SDL_Keycode kc = SDL_GetKeyFromName(v); if (kc != SDLK_UNKNOWN) cfg.kbd_k_x       = kc; }
+        else if (strcmp(k, "KbdStart")    == 0) { SDL_Keycode kc = SDL_GetKeyFromName(v); if (kc != SDLK_UNKNOWN) cfg.kbd_k_start   = kc; }
+        else if (strcmp(k, "KbdLabelConfirm") == 0) strncpy(cfg.kbd_label_confirm, v, sizeof(cfg.kbd_label_confirm) - 1);
+        else if (strcmp(k, "KbdLabelBack")    == 0) strncpy(cfg.kbd_label_back,    v, sizeof(cfg.kbd_label_back)    - 1);
+        else if (strcmp(k, "KbdLabelMenu")    == 0) strncpy(cfg.kbd_label_menu,    v, sizeof(cfg.kbd_label_menu)    - 1);
+        else if (strcmp(k, "KbdLabelMark")    == 0) strncpy(cfg.kbd_label_mark,    v, sizeof(cfg.kbd_label_mark)    - 1);
+        else if (strcmp(k, "KbdLabelPgUp")    == 0) strncpy(cfg.kbd_label_pgup,    v, sizeof(cfg.kbd_label_pgup)    - 1);
+        else if (strcmp(k, "KbdLabelPgDn")    == 0) strncpy(cfg.kbd_label_pgdn,    v, sizeof(cfg.kbd_label_pgdn)    - 1);
+        else if (strcmp(k, "KbdLabelMenu2")   == 0) strncpy(cfg.kbd_label_menu2,   v, sizeof(cfg.kbd_label_menu2)   - 1);
+        else if (strcmp(k, "KbdLabelX")       == 0) strncpy(cfg.kbd_label_x,       v, sizeof(cfg.kbd_label_x)       - 1);
+        else if (strcmp(k, "KbdLabelStart")   == 0) strncpy(cfg.kbd_label_start,   v, sizeof(cfg.kbd_label_start)   - 1);
         // [ActiveTheme] — name of the theme to activate on startup
         else if (strcmp(k, "ActiveTheme") == 0) {
             for (int i = 0; i < named_theme_count; i++) {
@@ -462,6 +502,30 @@ void save_config() {
     s = SDL_GameControllerGetStringForButton(cfg.osk_k_cancel); fprintf(f, "OskKeyCancel=%s\n", s ? s : "b");
     s = SDL_GameControllerGetStringForButton(cfg.osk_k_toggle); fprintf(f, "OskKeyToggle=%s\n", s ? s : "back");
     s = SDL_GameControllerGetStringForButton(cfg.osk_k_ins);    fprintf(f, "OskKeyIns=%s\n",    s ? s : "leftshoulder");
+
+    fprintf(f, "\n[KbdKeys]\n");
+    fprintf(f, "# Keyboard mode bindings (used when --keyb is active).\n");
+    fprintf(f, "# Key names: Return, Escape, Space, Tab, Backspace, Insert, Delete,\n");
+    fprintf(f, "#   PageUp, PageDown, F1-F12, Up, Down, Left, Right, or single letters.\n");
+    fprintf(f, "KbdConfirm=%s\n",  SDL_GetKeyName(cfg.kbd_k_confirm));
+    fprintf(f, "KbdBack=%s\n",     SDL_GetKeyName(cfg.kbd_k_back));
+    fprintf(f, "KbdMenu=%s\n",     SDL_GetKeyName(cfg.kbd_k_menu));
+    fprintf(f, "KbdMark=%s\n",     SDL_GetKeyName(cfg.kbd_k_mark));
+    fprintf(f, "KbdPgUp=%s\n",     SDL_GetKeyName(cfg.kbd_k_pgup));
+    fprintf(f, "KbdPgDn=%s\n",     SDL_GetKeyName(cfg.kbd_k_pgdn));
+    fprintf(f, "KbdMenu2=%s\n",    SDL_GetKeyName(cfg.kbd_k_menu2));
+    fprintf(f, "KbdX=%s\n",        SDL_GetKeyName(cfg.kbd_k_x));
+    fprintf(f, "KbdStart=%s\n",    SDL_GetKeyName(cfg.kbd_k_start));
+    fprintf(f, "# Physical button labels shown in hints when --keyb is active.\n");
+    fprintf(f, "KbdLabelConfirm=%s\n", cfg.kbd_label_confirm);
+    fprintf(f, "KbdLabelBack=%s\n",    cfg.kbd_label_back);
+    fprintf(f, "KbdLabelMenu=%s\n",    cfg.kbd_label_menu);
+    fprintf(f, "KbdLabelMark=%s\n",    cfg.kbd_label_mark);
+    fprintf(f, "KbdLabelPgUp=%s\n",    cfg.kbd_label_pgup);
+    fprintf(f, "KbdLabelPgDn=%s\n",    cfg.kbd_label_pgdn);
+    fprintf(f, "KbdLabelMenu2=%s\n",   cfg.kbd_label_menu2);
+    fprintf(f, "KbdLabelX=%s\n",       cfg.kbd_label_x);
+    fprintf(f, "KbdLabelStart=%s\n",   cfg.kbd_label_start);
 
     // Write active theme name so it's restored on next launch
     fprintf(f, "\n[ActiveTheme]\n");
