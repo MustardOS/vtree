@@ -1,30 +1,31 @@
 # vTree Gold
 
-A file manager for retro handheld Linux devices, controlled entirely by gamepad. Built in C with SDL2.
+A file manager for ~all~ most Linux retro handheld devices, controlled entirely by gamepad.
+Built in C with SDL2.
 
 ---
 
 ## Features
 
-- **Dual-pane explorer** — two independent directory views side by side; toggle single-pane mode in Settings → General for a full-width view
-- **File operations** — copy, cut, paste (with conflict resolution), rename, delete, new file/folder
-- **Symlink creation** — paste clipboard items as symlinks; filesystem-aware (only available when the destination supports symlinks)
-- **Script execution** — execute `.sh` scripts directly from the file manager; the launched app takes over the display cleanly (experimental, enable in Settings)
-- **Multi-select** — mark multiple files/folders with the Mark button; cursor auto-advances after each mark; B clears marks before navigating up
-- **Clipboard** — mark-and-operate across panes; cut/copy/paste/rename/delete blocked on the `..` entry
+- **Single or Dual-pane explorer** - Select between the classic two-pane view and a single-pane option ideal for smaller devices
+- **Robust suite of file operations** - Copy, Cut, Paste, Rename, Delete, Create new file/folder
+- **Symlink creation** - paste clipboard items as symlinks, fully filesystem-aware (only available when the destination supports symlinks)
+- **Multi-select** - mark multiple files/folders in one or both panes
 - **Viewers**
-  - Text viewer / line editor (with on-screen keyboard); D-pad left/right pans when not editing
+  - Text viewer / editor
   - Hex viewer / editor
   - Image viewer (pan, zoom, fit-to-screen)
-- **File / Dir info modal** — permissions, size (recursive for directories), owner/group, timestamps, symlink targets; multi-selection shows combined totals
-- **Symlink awareness** — symlinks shown in a distinct colour; metadata follows the target
-- **Themes** — 7 built-in presets (Dark, Green Phosphor, XTree Gold, Dracula, Solarized Dark, Nord, High Contrast); fully customisable via `theme.ini`
-- **Font selection** — drop `.ttf`/`.otf` files into a `fonts/` folder next to the binary; select in Settings
-- **Configurable key bindings** — explorer keys (including page up/down) and on-screen keyboard keys are independently rebindable
-- **Show hidden files** — toggle dotfile visibility in Settings
-- **Remember directories** — optionally save and restore pane paths across sessions
-- **Display rotation** — software rotation at 0°, 90°, 180°, or 270° for devices with rotated screens; configurable via `--rotate=` flag or Settings → General
-- **Auto-detects screen resolution** on first launch; falls back to 640×480
+- **File / Dir information** - permissions, size (recursive for directories), owner/group, timestamps, symlink targets; multi-selection shows combined totals
+- **Symlink awareness** - symlinks shown in a distinct colour; metadata follows the target
+- **Themes** - many built-in presets (Dark, MustardOS, Spruce, Dracula, and more...); fully customisable, supports new themes!
+- **Font selection** - drop `.ttf`/`.otf` files into a `fonts/` folder; select in Settings
+- **Configurable key bindings** — explorer keys and on-screen keyboard keys are independently rebindable
+- **Show hidden files** - toggle dotfile visibility in Settings
+- **Remember directories** - optionally save and restore pane paths across sessions
+- **Display rotation** - software rotation at 0°, 90°, 180°, or 270° for devices with rotated screens; configurable via `--rotate=` flag or Settings → General
+- **Auto-detects screen resolution** - on first launch; falls back to 640×480
+- **Mulit-language** - Fully supports multiple languages. Drop new ones into `./lang/Name.ini`
+- **Script execution** — execute `.sh` scripts directly from the file manager; the launched app takes over the display cleanly (experimental, enable in Settings)
 
 ---
 
@@ -54,20 +55,21 @@ make release CC=aarch64-buildroot-linux-gnu-gcc
 make clean
 ```
 
-The binary is named `vtree`. Place it alongside `./fonts`, `config.ini`, `theme.ini`, and the `res/` icon folder.
+The binary is named `vtree`. Place it alongside `./fonts`, `theme`, `config.ini`, and the `res/` icon folder.
 
 ---
 
 ## Directory Layout
 
 ```
-vtree                           — the binary
-fonts/JetBrainsMono-Medium.ttf  — default UI font (required)
-fonts/                          — fonts
-config.ini                      — user configuration (created/updated by Save Config)
-theme.ini                       — named theme presets
-res/                            — PNG icons used by the UI
-gamecontrollerdb.txt            — SDL controller mappings (optional)
+vtree                           - the binary
+config.ini                      - user configuration (created/updated by Save Config)
+fonts/                          - fonts
+fonts/JetBrainsMono-Medium.ttf  - default UI font (required)
+lang/English.ini                - default language file (required)
+res/                            - PNG icons used by the UI
+theme/                          - themes ini files
+gamecontrollerdb.txt            - SDL controller mappings (optional)
 ```
 
 ---
@@ -84,7 +86,8 @@ gamecontrollerdb.txt            — SDL controller mappings (optional)
 | A | Enter folder / open file; with marks active, opens action menu |
 | B | Clear all marks (if any); otherwise go up one directory |
 | Back / Select | Mark / unmark file (cursor auto-advances) |
-| Y / Guide | Open context menu |
+| Y | Open context menu |
+| Guide | Open settings menu (two-menu mode) |
 
 ### Context Menu
 
@@ -127,7 +130,7 @@ Disabled entries (e.g. Paste with empty clipboard, Symlink on unsupported filesy
 | D-pad | Pan image |
 | L1 / R1 | Previous / next image in folder |
 | A | Fit to screen |
-| Y | Zoom in / out |
+| Y / X | Zoom in / out |
 | B | Close viewer |
 
 ### On-Screen Keyboard (OSK)
@@ -206,7 +209,7 @@ Settings can also be changed at runtime from the context menu → Settings, then
 
 ## Theming
 
-Themes live in `theme.ini` as `[Theme.Name]` sections. The active theme is stored in `config.ini` under `[ActiveTheme]`. When you save config from the Settings screen, the current theme colours are also written back to `config.ini` so inline edits round-trip cleanly.
+Themes live in `./theme/theme-name.ini` as `[Theme.Name]` sections. The active theme is stored in `config.ini` under `[ActiveTheme]`. When you save config from the Settings screen, the current theme colours are also written back to `config.ini` so inline edits round-trip cleanly.
 
 Colour values are `#RRGGBB` or `#RRGGBBAA`.
 
