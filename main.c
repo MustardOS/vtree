@@ -27,7 +27,7 @@ int       active_pane = 0;
 AppMode   current_mode = MODE_EXPLORER;
 bool      debug_mode = false;
 FILE     *debug_log_file = NULL;
-char      configfile[512];
+char      configfile[MAX_PATH] = {0};
 
 // ---------------------------------------------------------------------------
 // Logging — writes to stdout + optional log file, with a wall-clock timestamp.

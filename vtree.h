@@ -144,7 +144,7 @@ extern FILE     *debug_log_file;
 void vtree_log(const char *fmt, ...);
 extern bool      delete_confirm_active;
 extern int       settings_index;
-extern char      configfile[512];
+extern char      configfile[MAX_PATH];
 
 // Legacy single-preset name table (just "Dark" now; kept so settings UI compiles)
 extern const char *theme_preset_names[THEME_PRESET_COUNT];
