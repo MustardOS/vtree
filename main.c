@@ -27,6 +27,7 @@ int       active_pane = 0;
 AppMode   current_mode = MODE_EXPLORER;
 bool      debug_mode = false;
 FILE     *debug_log_file = NULL;
+char      configfile[MAX_PATH] = {0};
 
 // ---------------------------------------------------------------------------
 // Logging — writes to stdout + optional log file, with a wall-clock timestamp.
@@ -1699,6 +1700,7 @@ int main(int argc, char *argv[]) {
             printf("Options:\n");
             printf("  -h, --help               Show this help and exit\n");
             printf("  -v, --version            Show version and exit\n");
+            printf("  -c, --config <file>      Use <file> instead of config.ini in same folder\n");
             printf("  --debug                  Enable debug logging to stdout\n");
             printf("  --logfile <file>         Write debug log to <file> (implies --debug)\n");
             printf("  --logfile=<file>         Same as above, alternative syntax\n");
@@ -1715,6 +1717,8 @@ int main(int argc, char *argv[]) {
         } else if (strcmp(argv[i], "--version") == 0 || strcmp(argv[i], "-v") == 0) {
             printf("vTree " VTREE_VERSION "\n");
             return 0;
+        } else if ((strcmp(argv[i], "-c") == 0 || strcmp(argv[i], "--config") == 0) && i + 1 < argc) {
+            snprintf(configfile, sizeof(configfile), "%s", argv[++i]); 
         } else if (strcmp(argv[i], "--debug") == 0) {
             debug_mode = true;
         } else if (strcmp(argv[i], "--logfile") == 0 && i + 1 < argc) {

@@ -71,7 +71,16 @@ static void get_sibling_path(const char *filename, char *out) {
 }
 
 // Convenience wrapper for the primary config file
-static void get_config_path(char *out) { get_sibling_path("config.ini", out); }
+static void get_config_path(char *out) { 
+  if (access(configfile, F_OK) == 0) {
+    strncpy(out, configfile, MAX_PATH - 1);
+    out[MAX_PATH - 1] = '\0';
+    vtree_log("Using configuration file from command line: %s\n", configfile);
+  } else {
+    get_sibling_path("config.ini", out);
+    vtree_log("Using configuration file from current directory: %s\n", "./config.ini");
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Helper: #RRGGBB or #RRGGBBAA → SDL_Color
