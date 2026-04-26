@@ -365,8 +365,8 @@ void load_config() {
         else if (strcmp(k, "Rotation")     == 0) { int r = atoi(v); cfg.rotation = (r >= 0 && r <= 3) ? r : 0; }
         else if (strcmp(k, "Language")     == 0) strncpy(cfg.language_name, v, sizeof(cfg.language_name) - 1);
         // [Paths]
-        else if (strcmp(k, "StartDirectoryLeft")  == 0) strcpy(cfg.start_left,        v);
-        else if (strcmp(k, "StartDirectoryRight") == 0) strcpy(cfg.start_right,       v);
+        else if (strcmp(k, "StartDirectoryLeft")  == 0) { if (!realpath(v, cfg.start_left))  strcpy(cfg.start_left,  v); }
+        else if (strcmp(k, "StartDirectoryRight") == 0) { if (!realpath(v, cfg.start_right)) strcpy(cfg.start_right, v); }
         else if (strcmp(k, "GameControllerDB")    == 0) strncpy(cfg.gamecontrollerdb, v, MAX_PATH - 1);
         // [Keys]
         else if (strcmp(k, "KeyConfirm") == 0) cfg.k_confirm = SDL_GameControllerGetButtonFromString(v);

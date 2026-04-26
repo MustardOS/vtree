@@ -6,6 +6,7 @@
 #include <unistd.h>
 #include <sys/stat.h>
 #include <sys/vfs.h>
+#include <sys/statvfs.h>
 #include <sys/wait.h>
 #include <dirent.h>
 #include <errno.h>
@@ -67,9 +68,10 @@ Uint32     glyph_frame = 0;
 #define TOPMENU_FILES    0
 #define TOPMENU_SETTINGS 1
 #define TOPMENU_ABOUT    2
-#define TOPMENU_EXIT     3
-#define TOPMENU_MAX      4
-static const char *topmenu_items[TOPMENU_MAX] = { "Menu_Files", "Menu_Settings", "Menu_About", "Menu_Exit" };
+#define TOPMENU_DISKINFO 3
+#define TOPMENU_EXIT     4
+#define TOPMENU_MAX      5
+static const char *topmenu_items[TOPMENU_MAX] = { "Menu_Files", "Menu_Settings", "Menu_About", "Menu_DiskInfo", "Menu_Exit" };
 
 // File-ops submenu
 #define FILEMENU_COPY    0
@@ -97,7 +99,7 @@ SDL_Texture *tex_file = NULL, *tex_folder = NULL;
 SDL_Texture *tex_img = NULL, *tex_txt = NULL, *tex_dirup = NULL;
 SDL_Texture *tex_copy = NULL, *tex_cut = NULL, *tex_paste = NULL, *tex_symlink = NULL;
 SDL_Texture *tex_rename = NULL, *tex_delete = NULL, *tex_settings = NULL, *tex_exit = NULL;
-SDL_Texture *tex_newfile = NULL, *tex_newfolder = NULL, *tex_about = NULL;
+SDL_Texture *tex_newfile = NULL, *tex_newfolder = NULL, *tex_about = NULL, *tex_diskinfo = NULL;
 SDL_Texture *tex_enterfol = NULL;
 SDL_Texture *tex_viewer = NULL, *tex_hexview = NULL, *tex_imgview = NULL, *tex_fileinfo = NULL, *tex_exec = NULL;
 SDL_Texture *tex_logo = NULL;
@@ -276,6 +278,14 @@ static int  choose_pane     = 0; // active pane at open_file() time
 // ---------------------------------------------------------------------------
 #define FILEINFO_MAX_LINES 8
 static bool fileinfo_active   = false;
+
+// Disk info modal
+#define DISKINFO_MAX_LINES 96
+static char diskinfo_lines[DISKINFO_MAX_LINES][128];
+static int  diskinfo_bar_pct[DISKINFO_MAX_LINES]; // -1 = text line, 0-100 = draw bar
+static int  diskinfo_line_count = 0;
+static int  diskinfo_scroll     = 0;
+static int  diskinfo_visible    = 0;
 static bool fileinfo_is_multi = false;
 static bool fileinfo_is_dir   = false;
 static bool exec_error_active = false;
@@ -1158,6 +1168,68 @@ static void draw_open_chooser() {
 }
 
 // ---------------------------------------------------------------------------
+// Disk info — data collection
+// ---------------------------------------------------------------------------
+static void populate_diskinfo(void) {
+    diskinfo_line_count = 0;
+    diskinfo_scroll     = 0;
+    for (int i = 0; i < DISKINFO_MAX_LINES; i++) diskinfo_bar_pct[i] = -1;
+
+    FILE *f = fopen("/proc/mounts", "r");
+    if (!f) {
+        snprintf(diskinfo_lines[diskinfo_line_count++], 128, "%s", tr("DiskInfo_NoPartitions"));
+        return;
+    }
+
+    // Track seen devices to skip duplicates (bind mounts, etc.)
+    dev_t seen_devs[64];
+    int   seen_count = 0;
+
+    char dev_field[256], mnt[256], fstype[64], opts[256];
+    int  freq, passno;
+    while (fscanf(f, "%255s %255s %63s %255s %d %d",
+                  dev_field, mnt, fstype, opts, &freq, &passno) == 6) {
+        // Skip virtual/memory filesystems
+        if (strcmp(fstype, "tmpfs") == 0 || strcmp(fstype, "devtmpfs") == 0) continue;
+
+        struct statvfs sv;
+        if (statvfs(mnt, &sv) != 0) continue;
+        if (sv.f_blocks == 0) continue;   // pseudo-filesystem
+
+        // Deduplicate by device number
+        struct stat st;
+        if (stat(mnt, &st) != 0) continue;
+        bool already_seen = false;
+        for (int i = 0; i < seen_count; i++) {
+            if (seen_devs[i] == st.st_dev) { already_seen = true; break; }
+        }
+        if (already_seen) continue;
+        if (seen_count < 64) seen_devs[seen_count++] = st.st_dev;
+
+        unsigned long long total = (unsigned long long)sv.f_blocks * sv.f_frsize;
+        unsigned long long avail = (unsigned long long)sv.f_bavail * sv.f_frsize;
+        unsigned long long used  = total > avail ? total - avail : 0;
+        int pct = total > 0 ? (int)(used * 100ULL / total) : 0;
+
+        char sz_total[16], sz_free[16];
+        format_size((long long)total, sz_total);
+        format_size((long long)avail, sz_free);
+
+        if (diskinfo_line_count + 4 > DISKINFO_MAX_LINES) break;
+        snprintf(diskinfo_lines[diskinfo_line_count++], 128, "%s  [%s]", mnt, fstype);
+        snprintf(diskinfo_lines[diskinfo_line_count++], 128, "  Total: %s   Free: %s   Used: %d%%",
+                 sz_total, sz_free, pct);
+        diskinfo_bar_pct[diskinfo_line_count] = pct;
+        diskinfo_lines[diskinfo_line_count++][0] = '\0';  // bar line (rendered as rect)
+        diskinfo_lines[diskinfo_line_count++][0] = '\0';  // blank separator
+    }
+    fclose(f);
+
+    if (diskinfo_line_count == 0)
+        snprintf(diskinfo_lines[diskinfo_line_count++], 128, "%s", tr("DiskInfo_NoPartitions"));
+}
+
+// ---------------------------------------------------------------------------
 // File info modal
 // ---------------------------------------------------------------------------
 static void draw_fileinfo_modal() {
@@ -1270,6 +1342,100 @@ static void draw_about_modal() {
     draw_txt_clipped(font_footer, tr("About_DismissHint"), mx + 18, ty, mw - 36, cfg.theme.text_disabled);
 
     SDL_RenderSetClipRect(renderer, NULL); // restore
+}
+
+// ---------------------------------------------------------------------------
+// Disk info modal
+// ---------------------------------------------------------------------------
+static void draw_diskinfo_modal(void) {
+    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+    SDL_SetRenderDrawColor(renderer, 0, 0, 0, 160);
+    SDL_Rect scr = {0, 0, cfg.screen_w, cfg.screen_h};
+    SDL_RenderFillRect(renderer, &scr);
+
+    int lh  = cfg.font_size_menu + 8;
+    int flh = cfg.font_size_footer + 8;
+    int hh  = cfg.font_size_header + 16;
+    int mw  = cfg.screen_w - 80;
+
+    // Compute how many lines fit within a screen-height cap
+    int max_body = cfg.screen_h - 40 - hh - 10 - 6 - flh - 8;
+    diskinfo_visible = max_body / (lh > 0 ? lh : 1);
+    if (diskinfo_visible < 1) diskinfo_visible = 1;
+    int show = diskinfo_line_count < diskinfo_visible ? diskinfo_line_count : diskinfo_visible;
+
+    // Clamp scroll
+    int max_scroll = diskinfo_line_count - diskinfo_visible;
+    if (max_scroll < 0) max_scroll = 0;
+    if (diskinfo_scroll > max_scroll) diskinfo_scroll = max_scroll;
+
+    int mh = hh + 10 + show * lh + 6 + flh + 8;
+    int mx = (cfg.screen_w - mw) / 2;
+    int my = (cfg.screen_h - mh) / 2;
+
+    SDL_Rect mbg  = {mx, my, mw, mh};
+    SDL_Rect body = {mx, my + hh, mw, mh - hh};
+    SDL_SetRenderDrawColor(renderer, cfg.theme.header_bg.r, cfg.theme.header_bg.g,
+                           cfg.theme.header_bg.b, 255);
+    SDL_RenderFillRect(renderer, &mbg);
+    SDL_SetRenderDrawColor(renderer, cfg.theme.menu_bg.r, cfg.theme.menu_bg.g,
+                           cfg.theme.menu_bg.b, cfg.theme.menu_bg.a);
+    SDL_RenderFillRect(renderer, &body);
+    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
+    SDL_SetRenderDrawColor(renderer, cfg.theme.menu_border.r, cfg.theme.menu_border.g,
+                           cfg.theme.menu_border.b, 255);
+    SDL_RenderDrawRect(renderer, &mbg);
+
+    SDL_RenderSetClipRect(renderer, &mbg);
+
+    // Header: icon + title
+    int lx = mx + 18;
+    if (tex_diskinfo) {
+        SDL_Rect ir = {lx, my + (hh - 24) / 2, 24, 24};
+        SDL_RenderCopy(renderer, tex_diskinfo, NULL, &ir);
+        lx += 30;
+    }
+    draw_txt(font_header, tr("DiskInfo_Title"), lx, my + (hh - cfg.font_size_header) / 2,
+             cfg.theme.marked);
+
+    // Body: scrollable lines
+    int ty = my + hh + 10;
+    for (int i = 0; i < show; i++) {
+        int li = i + diskinfo_scroll;
+        if (li >= diskinfo_line_count) break;
+        if (diskinfo_bar_pct[li] >= 0) {
+            // Draw a filled progress bar
+            int bx = mx + 22, bw = mw - 44, bh = lh - 8, by_pos = ty + 4;
+            SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+            SDL_SetRenderDrawColor(renderer, cfg.theme.menu_border.r, cfg.theme.menu_border.g,
+                                   cfg.theme.menu_border.b, 80);
+            SDL_Rect bg = {bx, by_pos, bw, bh};
+            SDL_RenderFillRect(renderer, &bg);
+            SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
+            int fill_w = bw * diskinfo_bar_pct[li] / 100;
+            if (fill_w > 0) {
+                SDL_SetRenderDrawColor(renderer, cfg.theme.marked.r, cfg.theme.marked.g,
+                                       cfg.theme.marked.b, 255);
+                SDL_Rect fill = {bx, by_pos, fill_w, bh};
+                SDL_RenderFillRect(renderer, &fill);
+            }
+            SDL_SetRenderDrawColor(renderer, cfg.theme.menu_border.r, cfg.theme.menu_border.g,
+                                   cfg.theme.menu_border.b, 255);
+            SDL_RenderDrawRect(renderer, &bg);
+        } else {
+            SDL_Color c = (diskinfo_lines[li][0] == ' ') ? cfg.theme.text_disabled : cfg.theme.text;
+            draw_txt_clipped(font_menu, diskinfo_lines[li], mx + 18, ty, mw - 36, c);
+        }
+        ty += lh;
+    }
+
+    // Footer
+    ty += 6;
+    const char *hint = (diskinfo_line_count > diskinfo_visible)
+        ? tr("DiskInfo_ScrollHint") : tr("DiskInfo_DismissHint");
+    draw_txt_clipped(font_footer, hint, mx + 18, ty, mw - 36, cfg.theme.text_disabled);
+
+    SDL_RenderSetClipRect(renderer, NULL);
 }
 
 // ---------------------------------------------------------------------------
@@ -1844,6 +2010,7 @@ int main(int argc, char *argv[]) {
         {&tex_settings,  "res/settings.png"},{&tex_exit,     "res/exit.png"},
         {&tex_newfile,   "res/newfile.png"}, {&tex_newfolder,"res/newfolder.png"},
         {&tex_about,     "res/about.png"},   {&tex_enterfol, "res/enterfol.png"},
+        {&tex_diskinfo,  "res/disk.png"},
         {&tex_viewer,    "res/viewer.png"},  {&tex_hexview,  "res/hexview.png"},
         {&tex_imgview,   "res/imgview.png"}, {&tex_fileinfo, "res/fileinfo.png"},
         {&tex_exec,      "res/exec.png"},
@@ -1885,6 +2052,7 @@ int main(int argc, char *argv[]) {
     bool menu_is_system = false;  // true when opened via k_menu2 (Settings/About/Exit only)
     bool about_active       = false;
     bool about_r1_held      = false;  // combo state for about-screen easter egg
+    bool diskinfo_active    = false;
     bool about_dpad_up_held = false;
     bool about_combo_fired  = false;
     bool running = true;
@@ -2121,6 +2289,16 @@ int main(int argc, char *argv[]) {
                             about_active = false;  // any other button dismisses
                             about_r1_held = about_dpad_up_held = about_combo_fired = false;
                         }
+                    // ── Disk info modal ───────────────────────────────────────
+                    } else if (diskinfo_active) {
+                        if (btn == SDL_CONTROLLER_BUTTON_DPAD_UP) {
+                            if (diskinfo_scroll > 0) diskinfo_scroll--;
+                        } else if (btn == SDL_CONTROLLER_BUTTON_DPAD_DOWN) {
+                            int max_s = diskinfo_line_count - diskinfo_visible;
+                            if (diskinfo_scroll < max_s) diskinfo_scroll++;
+                        } else {
+                            diskinfo_active = false;
+                        }
                     // ── File ops submenu ──────────────────────────────────────
                     } else if (menu_in_files) {
                         // items that cannot operate on ".." when nothing else is marked
@@ -2266,8 +2444,8 @@ int main(int argc, char *argv[]) {
                         }
                     // ── Top-level / system menu ───────────────────────────────
                     } else {
-                        static const int sys_items[] = { TOPMENU_SETTINGS, TOPMENU_ABOUT, TOPMENU_EXIT };
-                        int top_count = menu_is_system ? 3 : TOPMENU_MAX;
+                        static const int sys_items[] = { TOPMENU_SETTINGS, TOPMENU_ABOUT, TOPMENU_DISKINFO, TOPMENU_EXIT };
+                        int top_count = menu_is_system ? 4 : TOPMENU_MAX;
                         if (btn == cfg.k_menu || btn == cfg.k_back || btn == cfg.k_menu2) {
                             current_mode = MODE_EXPLORER; menu_is_system = false;
                             delete_confirm_active = false; paste_conflict_active = false;
@@ -2295,6 +2473,9 @@ int main(int argc, char *argv[]) {
                                 settings_index = 0; current_mode = MODE_SETTINGS;
                             } else if (sel == TOPMENU_ABOUT) {
                                 about_active = true;
+                            } else if (sel == TOPMENU_DISKINFO) {
+                                populate_diskinfo();
+                                diskinfo_active = true;
                             } else if (sel == TOPMENU_EXIT) {
                                 if (cfg.remember_dirs) {
                                     strncpy(cfg.start_left,  panes[0].current_path, MAX_PATH - 1);
@@ -2774,9 +2955,9 @@ int main(int argc, char *argv[]) {
         if (current_mode == MODE_CONTEXT_MENU) {
             int pi=6, isz=32, spc=(cfg.font_size_menu>isz?cfg.font_size_menu:isz)+pi;
             bool in_sub = menu_in_files;
-            static const int sys_render_items[] = { TOPMENU_SETTINGS, TOPMENU_ABOUT, TOPMENU_EXIT };
+            static const int sys_render_items[] = { TOPMENU_SETTINGS, TOPMENU_ABOUT, TOPMENU_DISKINFO, TOPMENU_EXIT };
             int  filemenu_count = cfg.two_menu_mode ? FILEMENU_MAX - 1 : FILEMENU_MAX;
-            int  item_count = in_sub ? filemenu_count : (menu_is_system ? 3 : TOPMENU_MAX);
+            int  item_count = in_sub ? filemenu_count : (menu_is_system ? 4 : TOPMENU_MAX);
             int mw=270, mh=item_count*spc+20, mx=(cfg.screen_w-mw)/2, my=(cfg.screen_h-mh)/2;
             SDL_Rect mbg={mx,my,mw,mh};
             SDL_SetRenderDrawBlendMode(renderer,SDL_BLENDMODE_BLEND);
@@ -2788,7 +2969,7 @@ int main(int argc, char *argv[]) {
 
             if (!in_sub) {
                 // ── Top-level / system menu ────────────────────────────────
-                SDL_Texture *top_icons[TOPMENU_MAX] = { tex_folder, tex_settings, tex_about, tex_exit };
+                SDL_Texture *top_icons[TOPMENU_MAX] = { tex_folder, tex_settings, tex_about, tex_diskinfo, tex_exit };
                 for (int i = 0; i < item_count; i++) {
                     int ti = menu_is_system ? sys_render_items[i] : i;  // actual TOPMENU_* index
                     bool sel = (i == menu_selection);
@@ -2861,6 +3042,7 @@ int main(int argc, char *argv[]) {
 
             // About modal on top of context menu
             if (about_active) draw_about_modal();
+            if (diskinfo_active) draw_diskinfo_modal();
         }
 
         // OSK overlay (on top of the explorer background)
@@ -2913,6 +3095,7 @@ int main(int argc, char *argv[]) {
     SDL_DestroyTexture(tex_rename); SDL_DestroyTexture(tex_delete);
     SDL_DestroyTexture(tex_settings); SDL_DestroyTexture(tex_exit);
     SDL_DestroyTexture(tex_newfile); SDL_DestroyTexture(tex_newfolder); SDL_DestroyTexture(tex_about);
+    SDL_DestroyTexture(tex_diskinfo);
     SDL_DestroyTexture(tex_logo);
     SDL_DestroyTexture(tex_enterfol);
     SDL_DestroyTexture(tex_viewer); SDL_DestroyTexture(tex_hexview);
