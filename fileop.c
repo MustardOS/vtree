@@ -119,34 +119,67 @@ void load_dir(int p_idx, const char* path) {
 
 // Copies file data from src to dst. Tries copy_file_range (kernel 4.5+, stays in-kernel)
 // and falls back to a read/write loop on ENOSYS/EXDEV/EINVAL (e.g. kernel 4.4, cross-device).
+// Updates paste_bytes_done/total for progress display and checks paste_abort for cancellation.
+#define COPY_CHUNK (16LL * 1024 * 1024)  // 16 MB per cfr chunk — balance progress vs syscall overhead
 static int copy_file_data(FILE *src, FILE *dst, off_t file_size) {
+    paste_bytes_total = (long long)file_size;
+    paste_bytes_done  = 0;
+
 #ifdef HAVE_CFR
     if (file_size > 0) {
         off_t off_in = 0, off_out = 0;
-        ssize_t r = do_cfr(fileno(src), &off_in, fileno(dst), &off_out, (size_t)file_size);
+        // Probe support with first chunk
+        size_t chunk = (size_t)(file_size < COPY_CHUNK ? file_size : COPY_CHUNK);
+        ssize_t r = do_cfr(fileno(src), &off_in, fileno(dst), &off_out, chunk);
         if (r >= 0 || (errno != ENOSYS && errno != EXDEV && errno != EINVAL)) {
             if (r < 0) return -1;
+            paste_bytes_done += r;
             off_t remaining = file_size - r;
-            while (remaining > 0) {
-                r = do_cfr(fileno(src), &off_in, fileno(dst), &off_out, (size_t)remaining);
+            while (remaining > 0 && !paste_abort) {
+                chunk = (size_t)(remaining < COPY_CHUNK ? remaining : COPY_CHUNK);
+                r = do_cfr(fileno(src), &off_in, fileno(dst), &off_out, chunk);
                 if (r <= 0) return r < 0 ? -1 : 0;
                 remaining -= r;
+                paste_bytes_done += r;
             }
-            return 0;
+            return paste_abort ? -1 : 0;
         }
         // Not supported — seek back and fall through to read/write
         rewind(src);
         rewind(dst);
+        paste_bytes_done = 0;
     }
 #else
     (void)file_size;
 #endif
     char buf[32768];
     size_t n;
-    while ((n = fread(buf, 1, sizeof(buf), src)) > 0) {
+    while ((n = fread(buf, 1, sizeof(buf), src)) > 0 && !paste_abort) {
         if (fwrite(buf, 1, n, dst) != n) return -1;
+        paste_bytes_done += n;
     }
+    if (paste_abort) return -1;
     return ferror(src) ? -1 : 0;
+}
+
+// Recursively count regular files under path (used to populate paste_files_total)
+int count_files(const char *path) {
+    struct stat st;
+    if (lstat(path, &st) != 0) return 0;
+    if (S_ISREG(st.st_mode)) return 1;
+    if (!S_ISDIR(st.st_mode)) return 0;
+    DIR *d = opendir(path);
+    if (!d) return 0;
+    int n = 0;
+    struct dirent *e;
+    while ((e = readdir(d))) {
+        if (strcmp(e->d_name, ".") == 0 || strcmp(e->d_name, "..") == 0) continue;
+        char sub[MAX_PATH];
+        join_path(sub, path, e->d_name);
+        n += count_files(sub);
+    }
+    closedir(d);
+    return n;
 }
 
 // (dev, ino) pairs for cycle detection during directory traversal
@@ -212,6 +245,7 @@ static int copy_path_r(const char *src, const char *dest,
         int err = 0;
         while ((e = readdir(dir))) {
             if (strcmp(e->d_name, ".") == 0 || strcmp(e->d_name, "..") == 0) continue;
+            if (paste_abort) { err = -1; break; }
             if (strlen(src) + strlen(e->d_name) + 2 >= MAX_PATH) {
                 vtree_log("[copy] path too long, skipping: %s/%s\n", src, e->d_name);
                 err = -1;
@@ -232,6 +266,21 @@ static int copy_path_r(const char *src, const char *dest,
 
     // Regular file (or other non-dir, non-link types)
     vtree_log("[copy] %s -> %s\n", src, dest);
+    {
+        // Display as "rootdir/relative/path" if src is inside paste_copy_root,
+        // otherwise just the basename (single-file copy)
+        size_t root_len = strlen(paste_copy_root);
+        if (root_len > 0 && strncmp(src, paste_copy_root, root_len) == 0
+                         && src[root_len] == '/') {
+            const char *root_bn = strrchr(paste_copy_root, '/');
+            root_bn = root_bn ? root_bn + 1 : paste_copy_root;
+            snprintf(paste_prog_name, MAX_PATH, "%s/%s", root_bn, src + root_len + 1);
+        } else {
+            const char *bn = strrchr(src, '/');
+            strncpy(paste_prog_name, bn ? bn + 1 : src, MAX_PATH - 1);
+            paste_prog_name[MAX_PATH - 1] = '\0';
+        }
+    }
 
     // Build temp path for atomic write; on success we rename into place
     char tmp[MAX_PATH];
@@ -278,6 +327,7 @@ static int copy_path_r(const char *src, const char *dest,
         unlink(tmp);
         return -1;
     }
+    paste_files_done++;
     return 0;
 }
 

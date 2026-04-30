@@ -13,11 +13,12 @@
 #include <time.h>
 #include <pwd.h>
 #include <grp.h>
+#include <pthread.h>
 
 // ---------------------------------------------------------------------------
 // Version
 // ---------------------------------------------------------------------------
-#define VTREE_VERSION "1.2"
+#define VTREE_VERSION "1.3"
 
 // ---------------------------------------------------------------------------
 // Globals
@@ -57,6 +58,19 @@ int       paste_conflict_count   = 0;   // how many clipboard items conflict
 bool      paste_dest_active      = false;
 int       paste_dest_sel         = 0;   // 0 = left pane, 1 = right pane
 int       paste_dest_pane        = 0;   // resolved destination pane index
+// Background paste (copy/move) thread
+static pthread_t       paste_tid;
+static volatile bool   paste_running = false;
+volatile bool          paste_abort   = false;   // extern in vtree.h — read by fileop.c
+static volatile bool   paste_done    = false;
+static int  paste_prog_cur   = 0;     // clipboard items completed so far
+static int  paste_prog_total = 0;     // total clipboard items
+char        paste_prog_name[MAX_PATH];  // current filename (updated per-file deep in copy_path_r)
+volatile long long     paste_bytes_done  = 0;   // extern in vtree.h — updated by copy_file_data
+volatile long long     paste_bytes_total = 0;   // extern in vtree.h — set by copy_file_data
+volatile int           paste_files_done  = 0;   // extern in vtree.h — files completed (not items)
+volatile int           paste_files_total = 0;   // extern in vtree.h — total files to copy
+char                   paste_copy_root[MAX_PATH];  // extern in vtree.h — root path for display
 static bool do_symlink_after_dest = false;  // dest chooser is for symlink, not paste
 int       settings_index = 0;
 Clipboard clip = { .op = OP_NONE, .count = 0 };
@@ -67,11 +81,11 @@ Uint32     glyph_frame = 0;
 // Top-level menu
 #define TOPMENU_FILES    0
 #define TOPMENU_SETTINGS 1
-#define TOPMENU_ABOUT    2
-#define TOPMENU_DISKINFO 3
+#define TOPMENU_DISKINFO 2
+#define TOPMENU_ABOUT    3
 #define TOPMENU_EXIT     4
 #define TOPMENU_MAX      5
-static const char *topmenu_items[TOPMENU_MAX] = { "Menu_Files", "Menu_Settings", "Menu_About", "Menu_DiskInfo", "Menu_Exit" };
+static const char *topmenu_items[TOPMENU_MAX] = { "Menu_Files", "Menu_Settings", "Menu_DiskInfo", "Menu_About", "Menu_Exit" };
 
 // File-ops submenu
 #define FILEMENU_COPY    0
@@ -286,6 +300,45 @@ static int  diskinfo_bar_pct[DISKINFO_MAX_LINES]; // -1 = text line, 0-100 = dra
 static int  diskinfo_line_count = 0;
 static int  diskinfo_scroll     = 0;
 static int  diskinfo_visible    = 0;
+// Drill-down state
+static int  diskinfo_mode      = 0;   // 0 = partition list, 1 = drill-down
+static int  diskinfo_sel_part  = 0;   // highlighted partition index (mode 0)
+static int  diskinfo_sel_dir   = 0;   // highlighted directory entry index (mode 1)
+static char diskinfo_drillpath[256];  // current drill-down path
+#define DISKINFO_DEPTH_MAX 16
+static char diskinfo_pathstack[DISKINFO_DEPTH_MAX][256];
+static int  diskinfo_depth     = 0;
+static int  diskinfo_part_lines[48];     // line index of each partition's header line
+static int  diskinfo_part_count = 0;    // number of partitions
+static char diskinfo_dir_paths[48][256]; // full paths of directory entries in drill-down
+static int  diskinfo_dir_count  = 0;    // number of directory entries in drill-down
+// Parallel stacks: save cursor/scroll position at each depth level
+static int  diskinfo_selstack[DISKINFO_DEPTH_MAX];
+static int  diskinfo_scrollstack[DISKINFO_DEPTH_MAX];
+// Scan result cache keyed by path
+#define DISKINFO_CACHE_MAX 6
+typedef struct {
+    char path[256];
+    char lines[DISKINFO_MAX_LINES][128];
+    int  bar_pct[DISKINFO_MAX_LINES];
+    int  line_count;
+    char dir_paths[48][256];
+    int  dir_count;
+    bool valid;
+} DiskinfoCacheEntry;
+static DiskinfoCacheEntry diskinfo_cache[DISKINFO_CACHE_MAX];
+static int  diskinfo_cache_next = 0;   // round-robin write pointer
+// Background scan thread
+static pthread_t       diskinfo_scan_tid;
+static volatile bool   diskinfo_scanning   = false;
+static volatile bool   diskinfo_scan_abort = false;
+static volatile bool   diskinfo_scan_ready = false;
+static char diskinfo_scan_for_path[256];
+static char diskinfo_scan_lines[DISKINFO_MAX_LINES][128];
+static int  diskinfo_scan_bar_pct[DISKINFO_MAX_LINES];
+static int  diskinfo_scan_line_count;
+static char diskinfo_scan_dir_paths[48][256];
+static int  diskinfo_scan_dir_count;
 static bool fileinfo_is_multi = false;
 static bool fileinfo_is_dir   = false;
 static bool exec_error_active = false;
@@ -1170,9 +1223,17 @@ static void draw_open_chooser() {
 // ---------------------------------------------------------------------------
 // Disk info — data collection
 // ---------------------------------------------------------------------------
+static void diskinfo_abort_scan(void); // forward declaration
+
 static void populate_diskinfo(void) {
+    diskinfo_abort_scan();  // cancel any in-progress drill scan
     diskinfo_line_count = 0;
     diskinfo_scroll     = 0;
+    diskinfo_mode       = 0;
+    diskinfo_depth      = 0;
+    diskinfo_sel_part   = 0;
+    diskinfo_sel_dir    = 0;
+    diskinfo_part_count = 0;
     for (int i = 0; i < DISKINFO_MAX_LINES; i++) diskinfo_bar_pct[i] = -1;
 
     FILE *f = fopen("/proc/mounts", "r");
@@ -1216,6 +1277,8 @@ static void populate_diskinfo(void) {
         format_size((long long)avail, sz_free);
 
         if (diskinfo_line_count + 4 > DISKINFO_MAX_LINES) break;
+        if (diskinfo_part_count < 48)
+            diskinfo_part_lines[diskinfo_part_count++] = diskinfo_line_count;
         snprintf(diskinfo_lines[diskinfo_line_count++], 128, "%s  [%s]", mnt, fstype);
         snprintf(diskinfo_lines[diskinfo_line_count++], 128, "  Total: %s   Free: %s   Used: %d%%",
                  sz_total, sz_free, pct);
@@ -1227,6 +1290,122 @@ static void populate_diskinfo(void) {
 
     if (diskinfo_line_count == 0)
         snprintf(diskinfo_lines[diskinfo_line_count++], 128, "%s", tr("DiskInfo_NoPartitions"));
+}
+
+static void *diskinfo_scan_fn(void *arg) {
+    (void)arg;
+    char cmd[512];
+    snprintf(cmd, sizeof(cmd), "du -d 1 \"%s\" 2>/dev/null | sort -rn",
+             diskinfo_scan_for_path);
+    FILE *fp = popen(cmd, "r");
+
+    int  lc = 0, dc = 0;
+    char sl[DISKINFO_MAX_LINES][128];
+    int  sb[DISKINFO_MAX_LINES];
+    char sdp[48][256];
+    for (int i = 0; i < DISKINFO_MAX_LINES; i++) sb[i] = -1;
+
+    if (!fp) {
+        snprintf(sl[lc++], 128, "  (scan failed)");
+    } else {
+        char line[512];
+        long long parent_kb = -1;
+        while (!diskinfo_scan_abort &&
+               fgets(line, sizeof(line), fp) &&
+               lc + 2 < DISKINFO_MAX_LINES && dc < 48) {
+            long long kb; char entry[256];
+            if (sscanf(line, "%lld %255[^\n]", &kb, entry) != 2) continue;
+            if (parent_kb < 0) { parent_kb = kb; continue; }
+            const char *dname = strrchr(entry, '/');
+            dname = dname ? dname + 1 : entry;
+            char sizestr[16];
+            format_size(kb * 1024, sizestr);
+            snprintf(sl[lc++], 128, "  %-26s %s", dname, sizestr);
+            int pct = (parent_kb > 0) ? (int)(kb * 100 / parent_kb) : 0;
+            sb[lc] = pct;
+            sl[lc++][0] = '\0';
+            strncpy(sdp[dc++], entry, 255);
+        }
+        pclose(fp);
+        if (lc == 0 && !diskinfo_scan_abort)
+            snprintf(sl[lc++], 128, "  (no subdirectories)");
+    }
+
+    if (!diskinfo_scan_abort) {
+        memcpy(diskinfo_scan_lines,     sl,  sizeof(sl));
+        memcpy(diskinfo_scan_bar_pct,   sb,  sizeof(sb));
+        memcpy(diskinfo_scan_dir_paths, sdp, sizeof(sdp));
+        diskinfo_scan_line_count = lc;
+        diskinfo_scan_dir_count  = dc;
+        diskinfo_scan_ready = true;
+    }
+    diskinfo_scanning = false;
+    return NULL;
+}
+
+static void diskinfo_abort_scan(void) {
+    if (diskinfo_scanning) {
+        diskinfo_scan_abort = true;
+        pthread_join(diskinfo_scan_tid, NULL);
+        diskinfo_scanning   = false;
+        diskinfo_scan_ready = false;
+        diskinfo_scan_abort = false;
+    }
+}
+
+static void diskinfo_cache_clear(void) {
+    for (int i = 0; i < DISKINFO_CACHE_MAX; i++) diskinfo_cache[i].valid = false;
+    diskinfo_cache_next = 0;
+}
+
+static int diskinfo_cache_find(const char *path) {
+    for (int i = 0; i < DISKINFO_CACHE_MAX; i++)
+        if (diskinfo_cache[i].valid && strcmp(diskinfo_cache[i].path, path) == 0)
+            return i;
+    return -1;
+}
+
+static void diskinfo_cache_store(const char *path) {
+    int slot = diskinfo_cache_find(path);  // update existing if present
+    if (slot < 0) {
+        slot = diskinfo_cache_next;
+        diskinfo_cache_next = (diskinfo_cache_next + 1) % DISKINFO_CACHE_MAX;
+    }
+    strncpy(diskinfo_cache[slot].path, path, 255);
+    memcpy(diskinfo_cache[slot].lines,     diskinfo_lines,    sizeof(diskinfo_lines));
+    memcpy(diskinfo_cache[slot].bar_pct,   diskinfo_bar_pct,  sizeof(diskinfo_bar_pct));
+    diskinfo_cache[slot].line_count = diskinfo_line_count;
+    memcpy(diskinfo_cache[slot].dir_paths, diskinfo_dir_paths, sizeof(diskinfo_dir_paths));
+    diskinfo_cache[slot].dir_count  = diskinfo_dir_count;
+    diskinfo_cache[slot].valid      = true;
+}
+
+static bool diskinfo_cache_restore(const char *path) {
+    int idx = diskinfo_cache_find(path);
+    if (idx < 0) return false;
+    memcpy(diskinfo_lines,     diskinfo_cache[idx].lines,     sizeof(diskinfo_lines));
+    memcpy(diskinfo_bar_pct,   diskinfo_cache[idx].bar_pct,   sizeof(diskinfo_bar_pct));
+    memcpy(diskinfo_dir_paths, diskinfo_cache[idx].dir_paths, sizeof(diskinfo_dir_paths));
+    diskinfo_line_count = diskinfo_cache[idx].line_count;
+    diskinfo_dir_count  = diskinfo_cache[idx].dir_count;
+    return true;
+}
+
+static void populate_diskinfo_drill(const char *path) {
+    diskinfo_abort_scan();
+    diskinfo_line_count = 0;
+    diskinfo_scroll     = 0;
+    diskinfo_sel_dir    = 0;
+    diskinfo_dir_count  = 0;
+    for (int i = 0; i < DISKINFO_MAX_LINES; i++) diskinfo_bar_pct[i] = -1;
+
+    if (diskinfo_cache_restore(path)) return;  // instant if cached
+
+    strncpy(diskinfo_scan_for_path, path, 255);
+    diskinfo_scan_ready = false;
+    diskinfo_scan_abort = false;
+    diskinfo_scanning   = true;
+    pthread_create(&diskinfo_scan_tid, NULL, diskinfo_scan_fn, NULL);
 }
 
 // ---------------------------------------------------------------------------
@@ -1348,6 +1527,18 @@ static void draw_about_modal() {
 // Disk info modal
 // ---------------------------------------------------------------------------
 static void draw_diskinfo_modal(void) {
+    // Swap in scan results when the background thread has finished
+    if (diskinfo_scan_ready) {
+        pthread_join(diskinfo_scan_tid, NULL);  // ensures memory visibility
+        memcpy(diskinfo_lines,    diskinfo_scan_lines,     sizeof(diskinfo_scan_lines));
+        memcpy(diskinfo_bar_pct,  diskinfo_scan_bar_pct,   sizeof(diskinfo_scan_bar_pct));
+        memcpy(diskinfo_dir_paths, diskinfo_scan_dir_paths, sizeof(diskinfo_scan_dir_paths));
+        diskinfo_line_count = diskinfo_scan_line_count;
+        diskinfo_dir_count  = diskinfo_scan_dir_count;
+        diskinfo_scan_ready = false;
+        diskinfo_cache_store(diskinfo_scan_for_path);  // cache so back-nav is instant
+    }
+
     SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
     SDL_SetRenderDrawColor(renderer, 0, 0, 0, 160);
     SDL_Rect scr = {0, 0, cfg.screen_w, cfg.screen_h};
@@ -1369,7 +1560,9 @@ static void draw_diskinfo_modal(void) {
     if (max_scroll < 0) max_scroll = 0;
     if (diskinfo_scroll > max_scroll) diskinfo_scroll = max_scroll;
 
-    int mh = hh + 10 + show * lh + 6 + flh + 8;
+    // Reserve body space for the scanning label even when no entries exist yet
+    int body_rows = (diskinfo_scanning && show < 4) ? 4 : show;
+    int mh = hh + 10 + body_rows * lh + 6 + flh + 8;
     int mx = (cfg.screen_w - mw) / 2;
     int my = (cfg.screen_h - mh) / 2;
 
@@ -1388,51 +1581,131 @@ static void draw_diskinfo_modal(void) {
 
     SDL_RenderSetClipRect(renderer, &mbg);
 
-    // Header: icon + title
+    // Header: icon + title (or breadcrumb in drill-down mode)
     int lx = mx + 18;
     if (tex_diskinfo) {
         SDL_Rect ir = {lx, my + (hh - 24) / 2, 24, 24};
         SDL_RenderCopy(renderer, tex_diskinfo, NULL, &ir);
         lx += 30;
     }
-    draw_txt(font_header, tr("DiskInfo_Title"), lx, my + (hh - cfg.font_size_header) / 2,
-             cfg.theme.marked);
+    const char *header_text = (diskinfo_mode == 1) ? diskinfo_drillpath : tr("DiskInfo_Title");
+    draw_txt_clipped(font_header, header_text, lx, my + (hh - cfg.font_size_header) / 2,
+                     mw - (lx - mx) - 18, cfg.theme.text);
 
     // Body: scrollable lines
-    int ty = my + hh + 10;
-    for (int i = 0; i < show; i++) {
-        int li = i + diskinfo_scroll;
-        if (li >= diskinfo_line_count) break;
-        if (diskinfo_bar_pct[li] >= 0) {
-            // Draw a filled progress bar
-            int bx = mx + 22, bw = mw - 44, bh = lh - 8, by_pos = ty + 4;
-            SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
-            SDL_SetRenderDrawColor(renderer, cfg.theme.menu_border.r, cfg.theme.menu_border.g,
-                                   cfg.theme.menu_border.b, 80);
-            SDL_Rect bg = {bx, by_pos, bw, bh};
-            SDL_RenderFillRect(renderer, &bg);
-            SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
-            int fill_w = bw * diskinfo_bar_pct[li] / 100;
-            if (fill_w > 0) {
-                SDL_SetRenderDrawColor(renderer, cfg.theme.marked.r, cfg.theme.marked.g,
-                                       cfg.theme.marked.b, 255);
-                SDL_Rect fill = {bx, by_pos, fill_w, bh};
-                SDL_RenderFillRect(renderer, &fill);
-            }
-            SDL_SetRenderDrawColor(renderer, cfg.theme.menu_border.r, cfg.theme.menu_border.g,
-                                   cfg.theme.menu_border.b, 255);
-            SDL_RenderDrawRect(renderer, &bg);
-        } else {
-            SDL_Color c = (diskinfo_lines[li][0] == ' ') ? cfg.theme.text_disabled : cfg.theme.text;
-            draw_txt_clipped(font_menu, diskinfo_lines[li], mx + 18, ty, mw - 36, c);
+    int ty       = my + hh + 10;
+    int body_top = ty;
+
+    // Compute selection group rectangle (all rows of the selected entry)
+    int grp_li = -1, grp_rows = 0;
+    if (!diskinfo_scanning) {
+        if (diskinfo_mode == 0 && diskinfo_part_count > 0) {
+            grp_li   = diskinfo_part_lines[diskinfo_sel_part];
+            grp_rows = 3;  // header + stats + bar
+        } else if (diskinfo_mode == 1 && diskinfo_dir_count > 0) {
+            grp_li   = diskinfo_sel_dir * 2;
+            grp_rows = 2;  // name + bar
         }
-        ty += lh;
+    }
+    SDL_Rect sel_border = {0, 0, 0, 0};
+    bool sel_border_valid = false;
+    if (grp_li >= 0) {
+        int gv0 = grp_li - diskinfo_scroll;
+        int gv1 = gv0 + grp_rows - 1;
+        if (gv1 >= 0 && gv0 < diskinfo_visible) {
+            int cv0 = gv0 < 0 ? 0 : gv0;
+            int cv1 = gv1 >= diskinfo_visible ? diskinfo_visible - 1 : gv1;
+            int pad = 2;
+            sel_border.x = mx + 6;
+            sel_border.y = body_top + cv0 * lh - pad;
+            sel_border.w = mw - 12;
+            sel_border.h = (cv1 - cv0 + 1) * lh + pad * 2;
+            sel_border_valid = true;
+            // Subtle fill drawn before lines so content renders on top
+            SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+            SDL_SetRenderDrawColor(renderer, cfg.theme.highlight_bg.r, cfg.theme.highlight_bg.g,
+                                   cfg.theme.highlight_bg.b, 60);
+            SDL_RenderFillRect(renderer, &sel_border);
+            SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
+        }
+    }
+
+    if (!diskinfo_scanning) {
+        for (int i = 0; i < show; i++) {
+            int li = i + diskinfo_scroll;
+            if (li >= diskinfo_line_count) break;
+            // Determine if this text line is the currently selected item
+            bool is_selected = false;
+            if (diskinfo_bar_pct[li] < 0) {
+                if (diskinfo_mode == 0 && diskinfo_part_count > 0 &&
+                        li == diskinfo_part_lines[diskinfo_sel_part])
+                    is_selected = true;
+                else if (diskinfo_mode == 1 && diskinfo_dir_count > 0 &&
+                         li == diskinfo_sel_dir * 2)
+                    is_selected = true;
+            }
+            if (diskinfo_bar_pct[li] >= 0) {
+                // Draw a filled progress bar
+                int bx = mx + 22, bw = mw - 44, bh = lh - 8, by_pos = ty + 4;
+                SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+                SDL_SetRenderDrawColor(renderer, cfg.theme.menu_border.r, cfg.theme.menu_border.g,
+                                       cfg.theme.menu_border.b, 80);
+                SDL_Rect bg = {bx, by_pos, bw, bh};
+                SDL_RenderFillRect(renderer, &bg);
+                SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
+                int fill_w = bw * diskinfo_bar_pct[li] / 100;
+                if (fill_w > 0) {
+                    SDL_SetRenderDrawColor(renderer, cfg.theme.highlight_bg.r, cfg.theme.highlight_bg.g,
+                                           cfg.theme.highlight_bg.b, 255);
+                    SDL_Rect fill = {bx, by_pos, fill_w, bh};
+                    SDL_RenderFillRect(renderer, &fill);
+                }
+                SDL_SetRenderDrawColor(renderer, cfg.theme.menu_border.r, cfg.theme.menu_border.g,
+                                       cfg.theme.menu_border.b, 255);
+                SDL_RenderDrawRect(renderer, &bg);
+            } else {
+                SDL_Color c = is_selected ? cfg.theme.highlight_text
+                            : (diskinfo_lines[li][0] == ' ') ? cfg.theme.text_disabled
+                            : cfg.theme.text;
+                draw_txt_clipped(font_menu, diskinfo_lines[li], mx + 18, ty, mw - 36, c);
+            }
+            ty += lh;
+        }
+        // Thin border drawn on top of all content so it frames the group cleanly
+        if (sel_border_valid) {
+            SDL_SetRenderDrawColor(renderer, cfg.theme.highlight_bg.r, cfg.theme.highlight_bg.g,
+                                   cfg.theme.highlight_bg.b, 220);
+            SDL_RenderDrawRect(renderer, &sel_border);
+        }
+    } else {
+        static const char *dots[] = {"", ".", "..", "..."};
+        char scan_body[64];
+        snprintf(scan_body, sizeof(scan_body), tr("DiskInfo_ScanBody"),
+                 dots[(SDL_GetTicks() / 400) % 4]);
+        int scan_y = body_top + (body_rows * lh) / 2 - cfg.font_size_menu / 2;
+        draw_txt_clipped(font_menu, scan_body, mx + 18, scan_y, mw - 36,
+                         cfg.theme.text_disabled);
     }
 
     // Footer
     ty += 6;
-    const char *hint = (diskinfo_line_count > diskinfo_visible)
-        ? tr("DiskInfo_ScrollHint") : tr("DiskInfo_DismissHint");
+    char hint_buf[128];
+    const char *hint;
+    if (diskinfo_scanning) {
+        snprintf(hint_buf, sizeof(hint_buf), tr("DiskInfo_ScanHint"), btn_label(cfg.k_back));
+        hint = hint_buf;
+    } else if (diskinfo_mode == 1) {
+        snprintf(hint_buf, sizeof(hint_buf), tr("DiskInfo_DrillHint"),
+                 btn_label(cfg.k_confirm), btn_label(cfg.k_back), btn_label(cfg.k_menu));
+        hint = hint_buf;
+    } else if (diskinfo_part_count > 0) {
+        snprintf(hint_buf, sizeof(hint_buf), tr("DiskInfo_SelHint"),
+                 btn_label(cfg.k_confirm), btn_label(cfg.k_menu));
+        hint = hint_buf;
+    } else {
+        hint = (diskinfo_line_count > diskinfo_visible)
+            ? tr("DiskInfo_ScrollHint") : tr("DiskInfo_DismissHint");
+    }
     draw_txt_clipped(font_footer, hint, mx + 18, ty, mw - 36, cfg.theme.text_disabled);
 
     SDL_RenderSetClipRect(renderer, NULL);
@@ -1623,6 +1896,8 @@ static void open_file(const char *path, const char *name) {
 typedef enum { PC_OVERWRITE = 0, PC_KEEP_BOTH = 1, PC_SKIP = 2, PC_CANCEL = 3 } PasteConflict;
 #define PC_MAX 4
 static const char *pc_labels[PC_MAX] = { "Paste_Overwrite", "Paste_KeepBoth", "Paste_Skip", "Paste_Cancel" };
+typedef struct { PasteConflict res; int pane_idx; } PasteArgs;
+static PasteArgs paste_args;
 
 // Generate a unique destination path: "stem (copy).ext", "stem (copy 2).ext", ...
 static void make_copy_path(const char *dir, const char *name, char *out) {
@@ -1668,22 +1943,36 @@ static int count_paste_conflicts(int pane_idx) {
     return n;
 }
 
-// Execute paste using the chosen conflict resolution into the given pane
-static void do_paste(PasteConflict res, int pane_idx) {
-    if (res == PC_CANCEL) { paste_conflict_active = false; paste_dest_active = false; return; }
-    AppState *s = &panes[pane_idx];
-    for (int i = 0; i < clip.count; i++) {
+// Background thread: performs the actual copy/move work
+static void *paste_thread_fn(void *arg) {
+    (void)arg;
+    PasteConflict res      = paste_args.res;
+    int           pane_idx = paste_args.pane_idx;
+    AppState     *s        = &panes[pane_idx];
+
+    // Quick file count pass so the display can show "X / N files"
+    int total = 0;
+    for (int i = 0; i < paste_prog_total; i++) total += count_files(clip.src_paths[i]);
+    paste_files_total = total;
+
+    for (int i = 0; i < paste_prog_total && !paste_abort; i++) {
         char d[MAX_PATH]; join_path(d, s->current_path, clip.names[i]);
 
-        // Self-copy is a no-op unless the user chose Keep Both (which renames
-        // the destination to a "(copy)" path, making it safe to proceed).
-        if (clip.op == OP_COPY && strcmp(clip.src_paths[i], d) == 0 && res != PC_KEEP_BOTH) continue;
+        if (clip.op == OP_COPY && strcmp(clip.src_paths[i], d) == 0 && res != PC_KEEP_BOTH) {
+            paste_prog_cur++;
+            continue;
+        }
+
+        // Set top-level item name as initial display; copy_path_r will refine it per-file
+        strncpy(paste_prog_name, clip.names[i], MAX_PATH - 1);
+        paste_prog_name[MAX_PATH - 1] = '\0';
+        strncpy(paste_copy_root, clip.src_paths[i], MAX_PATH - 1);
+        paste_copy_root[MAX_PATH - 1] = '\0';
 
         bool conflict = (access(d, F_OK) == 0);
         if (conflict) {
-            if (res == PC_SKIP) continue;
+            if (res == PC_SKIP) { paste_prog_cur++; continue; }
             if (res == PC_KEEP_BOTH) make_copy_path(s->current_path, clip.names[i], d);
-            // PC_OVERWRITE: d unchanged — existing file will be replaced
         }
         if (clip.op == OP_COPY) {
             copy_path(clip.src_paths[i], d);
@@ -1693,17 +1982,43 @@ static void do_paste(PasteConflict res, int pane_idx) {
                     vtree_log("[move] rename FAILED: %s -> %s (errno %d: %s)\n",
                               clip.src_paths[i], d, errno, strerror(errno));
                 } else {
-                    copy_path(clip.src_paths[i], d);
-                    delete_path(clip.src_paths[i]);
+                    int cr = copy_path(clip.src_paths[i], d);
+                    if (!paste_abort && cr == 0) delete_path(clip.src_paths[i]);
                 }
             }
         }
+        paste_prog_cur++;
     }
-    clip.op = OP_NONE; clip.count = 0;
+
+    paste_done = true;
+    return NULL;
+}
+
+// Kick off a background paste; completion is polled in the main loop
+static void do_paste(PasteConflict res, int pane_idx) {
+    if (res == PC_CANCEL) { paste_conflict_active = false; paste_dest_active = false; return; }
+
+    paste_args.res      = res;
+    paste_args.pane_idx = pane_idx;
+    paste_abort         = false;
+    paste_done          = false;
+    paste_prog_cur      = 0;
+    paste_prog_total    = clip.count;
+    paste_prog_name[0]  = '\0';
+    paste_files_done    = 0;
+    paste_files_total   = 0;
+    paste_bytes_done    = 0;
+    paste_bytes_total   = 0;
+    paste_copy_root[0]  = '\0';
+
     paste_conflict_active = false;
     paste_dest_active     = false;
-    load_dir(0, panes[0].current_path); load_dir(1, panes[1].current_path);
-    current_mode = MODE_EXPLORER;
+
+    paste_running = true;
+    if (pthread_create(&paste_tid, NULL, paste_thread_fn, NULL) != 0) {
+        vtree_log("[paste] pthread_create FAILED (errno %d: %s)\n", errno, strerror(errno));
+        paste_running = false;
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1791,6 +2106,96 @@ static void draw_paste_conflict(void) {
         if (i == PC_CANCEL && i != paste_conflict_sel) lc = cfg.theme.text_disabled;
         draw_txt_clipped(font_menu, tr(pc_labels[i]), mx + 16, iy + (spc - cfg.font_size_menu) / 2, mw - 32, lc);
     }
+    SDL_RenderSetClipRect(renderer, NULL);
+}
+
+static void draw_paste_progress(void) {
+    int hh  = cfg.font_size_footer + 14;
+    int lh  = cfg.font_size_menu   + 14;
+    int mw  = cfg.screen_w - 80;
+    int mh  = hh + lh * 3 + hh + 8;
+    int mx  = (cfg.screen_w - mw) / 2;
+    int my  = (cfg.screen_h - mh) / 2;
+
+    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+    SDL_SetRenderDrawColor(renderer, 0, 0, 0, 160);
+    SDL_Rect scr = {0, 0, cfg.screen_w, cfg.screen_h};
+    SDL_RenderFillRect(renderer, &scr);
+    SDL_Rect mbg = {mx, my, mw, mh};
+    SDL_Rect bdy = {mx, my + hh, mw, mh - hh};
+    SDL_SetRenderDrawColor(renderer, cfg.theme.header_bg.r, cfg.theme.header_bg.g, cfg.theme.header_bg.b, 255);
+    SDL_RenderFillRect(renderer, &mbg);
+    SDL_SetRenderDrawColor(renderer, cfg.theme.menu_bg.r, cfg.theme.menu_bg.g, cfg.theme.menu_bg.b, cfg.theme.menu_bg.a);
+    SDL_RenderFillRect(renderer, &bdy);
+    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
+    SDL_SetRenderDrawColor(renderer, cfg.theme.menu_border.r, cfg.theme.menu_border.g, cfg.theme.menu_border.b, 255);
+    SDL_RenderDrawRect(renderer, &mbg);
+    SDL_RenderSetClipRect(renderer, &mbg);
+
+    const char *title = (clip.op == OP_COPY) ? tr("Paste_CopyingTitle") : tr("Paste_MovingTitle");
+    draw_txt_clipped(font_footer, title,
+                     mx + 12, my + (hh - cfg.font_size_footer) / 2, mw - 24, cfg.theme.text_disabled);
+
+    int ty = my + hh + (lh - cfg.font_size_menu) / 2;
+    draw_txt_clipped(font_menu, paste_prog_name, mx + 16, ty, mw - 32, cfg.theme.text);
+    ty += lh;
+
+    // Second row: file count + byte progress for current file
+    long long bdone  = paste_bytes_done;
+    long long btotal = paste_bytes_total;
+    int       pfd    = paste_files_done;
+    int       pft    = paste_files_total;
+    char prog[80];
+    int filled;
+    int bar_x = mx + 16, bar_w = mw - 32, bar_h = 6;
+    const char *file_word = (pft == 1) ? "file" : "files";
+    if (btotal > 0) {
+        char done_str[16], total_str[16];
+        format_size(bdone,  done_str);
+        format_size(btotal, total_str);
+        if (pft > 0)
+            snprintf(prog, sizeof(prog), "%d / %d %s   %s / %s",
+                     pfd, pft, file_word, done_str, total_str);
+        else if (pfd > 0)
+            snprintf(prog, sizeof(prog), "%d %s   %s / %s",
+                     pfd, pfd == 1 ? "file" : "files", done_str, total_str);
+        else
+            snprintf(prog, sizeof(prog), "%s / %s", done_str, total_str);
+        filled = (int)((long long)bar_w * bdone / btotal);
+    } else if (pft > 0) {
+        snprintf(prog, sizeof(prog), "%d / %d %s", pfd, pft, file_word);
+        filled = (int)((long long)bar_w * pfd / pft);
+    } else if (pfd > 0) {
+        snprintf(prog, sizeof(prog), "%d %s", pfd, pfd == 1 ? "file" : "files");
+        filled = 0;
+    } else {
+        snprintf(prog, sizeof(prog), tr("Paste_Progress"), paste_prog_cur, paste_prog_total);
+        filled = (paste_prog_total > 0)
+                 ? (int)((long long)bar_w * paste_prog_cur / paste_prog_total) : 0;
+    }
+    draw_txt_clipped(font_menu, prog, mx + 16, ty, mw - 32, cfg.theme.text_disabled);
+
+    // Progress bar
+    int bar_y = my + hh + lh * 2 + (lh - bar_h) / 2;
+    SDL_Rect bar_bg = {bar_x, bar_y, bar_w, bar_h};
+    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+    SDL_SetRenderDrawColor(renderer, cfg.theme.menu_border.r, cfg.theme.menu_border.g, cfg.theme.menu_border.b, 80);
+    SDL_RenderFillRect(renderer, &bar_bg);
+    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
+    if (filled > 0) {
+        SDL_SetRenderDrawColor(renderer, cfg.theme.highlight_bg.r, cfg.theme.highlight_bg.g, cfg.theme.highlight_bg.b, 255);
+        SDL_Rect bar_fg = {bar_x, bar_y, filled, bar_h};
+        SDL_RenderFillRect(renderer, &bar_fg);
+    }
+    SDL_SetRenderDrawColor(renderer, cfg.theme.menu_border.r, cfg.theme.menu_border.g, cfg.theme.menu_border.b, 255);
+    SDL_RenderDrawRect(renderer, &bar_bg);
+
+    char hint[64];
+    snprintf(hint, sizeof(hint), tr("Paste_ProgressHint"), btn_label(cfg.k_back));
+    draw_txt_clipped(font_footer, hint,
+                     mx + 12, my + hh + lh * 2 + lh + (hh - cfg.font_size_footer) / 2,
+                     mw - 24, cfg.theme.text_disabled);
+
     SDL_RenderSetClipRect(renderer, NULL);
 }
 
@@ -1947,11 +2352,26 @@ int main(int argc, char *argv[]) {
 
     // Load gamecontrollerdb — skipped in keyboard mode
     if (!cfg.keyboard_mode) {
-        const char *db = cfg.gamecontrollerdb[0] ? cfg.gamecontrollerdb : "gamecontrollerdb.txt";
-        if (SDL_GameControllerAddMappingsFromFile(db) >= 0)
-            vtree_log("Gamecontrollerdb loaded: %s\n", db);
-        else
-            vtree_log("Gamecontrollerdb not found: %s\n", db);
+        bool db_loaded = false;
+        if (cfg.gamecontrollerdb[0]) {
+            // Explicit path from config
+            db_loaded = SDL_GameControllerAddMappingsFromFile(cfg.gamecontrollerdb) >= 0;
+            vtree_log("Gamecontrollerdb %s: %s\n", db_loaded ? "loaded" : "not found", cfg.gamecontrollerdb);
+        } else {
+            // Try sibling to executable, then system path
+            static const char *fallbacks[] = { NULL, "/usr/lib/gamecontrollerdb.txt" };
+            char sibling[MAX_PATH];
+            snprintf(sibling, sizeof(sibling), "%s/gamecontrollerdb.txt", vtree_exe_dir);
+            fallbacks[0] = sibling;
+            for (int fi = 0; fi < 2 && !db_loaded; fi++) {
+                if (SDL_GameControllerAddMappingsFromFile(fallbacks[fi]) >= 0) {
+                    db_loaded = true;
+                    vtree_log("Gamecontrollerdb loaded: %s\n", fallbacks[fi]);
+                }
+            }
+            if (!db_loaded)
+                vtree_log("Gamecontrollerdb not found in app dir or /usr/lib/\n");
+        }
     } else {
         vtree_log("Keyboard mode: gamecontrollerdb skipped\n");
     }
@@ -2072,6 +2492,16 @@ int main(int argc, char *argv[]) {
     while (running) {
         Uint32 now = SDL_GetTicks();
 
+        // Check background paste completion
+        if (paste_running && paste_done) {
+            pthread_join(paste_tid, NULL);
+            paste_running = false;
+            clip.op = OP_NONE; clip.count = 0;
+            load_dir(0, panes[0].current_path);
+            load_dir(1, panes[1].current_path);
+            current_mode = MODE_EXPLORER;
+        }
+
         while (SDL_PollEvent(&ev)) {
             if (ev.type == SDL_QUIT) {
                 if (cfg.remember_dirs) {
@@ -2117,6 +2547,12 @@ int main(int argc, char *argv[]) {
             if (ev.type == SDL_CONTROLLERBUTTONDOWN) {
                 SDL_GameControllerButton btn = ev.cbutton.button;
                 AppState *s = &panes[active_pane];
+
+                // ── PASTE IN PROGRESS ─────────────────────────────────────
+                if (paste_running) {
+                    if (btn == cfg.k_back) paste_abort = true;
+                    continue;
+                }
 
                 // ── SNAKE ────────────────────────────────────────────────────
                 if (current_mode == MODE_SNAKE) {
@@ -2291,12 +2727,92 @@ int main(int argc, char *argv[]) {
                         }
                     // ── Disk info modal ───────────────────────────────────────
                     } else if (diskinfo_active) {
-                        if (btn == SDL_CONTROLLER_BUTTON_DPAD_UP) {
-                            if (diskinfo_scroll > 0) diskinfo_scroll--;
+                        if (btn == cfg.k_menu || btn == cfg.k_menu2) {
+                            diskinfo_abort_scan();
+                            diskinfo_active = false;
+                        } else if (btn == SDL_CONTROLLER_BUTTON_DPAD_UP) {
+                            if (diskinfo_mode == 0) {
+                                if (diskinfo_sel_part > 0) {
+                                    diskinfo_sel_part--;
+                                    // Scroll to keep selection visible
+                                    int sel_line = diskinfo_part_lines[diskinfo_sel_part];
+                                    if (sel_line < diskinfo_scroll)
+                                        diskinfo_scroll = sel_line;
+                                }
+                            } else {
+                                if (diskinfo_sel_dir > 0) {
+                                    diskinfo_sel_dir--;
+                                    int sel_line = diskinfo_sel_dir * 2;
+                                    if (sel_line < diskinfo_scroll)
+                                        diskinfo_scroll = sel_line;
+                                }
+                            }
                         } else if (btn == SDL_CONTROLLER_BUTTON_DPAD_DOWN) {
-                            int max_s = diskinfo_line_count - diskinfo_visible;
-                            if (diskinfo_scroll < max_s) diskinfo_scroll++;
-                        } else {
+                            if (diskinfo_mode == 0) {
+                                if (diskinfo_sel_part < diskinfo_part_count - 1) {
+                                    diskinfo_sel_part++;
+                                    // Scroll to keep selection visible
+                                    int sel_line = diskinfo_part_lines[diskinfo_sel_part];
+                                    int max_s = diskinfo_line_count - diskinfo_visible;
+                                    if (max_s < 0) max_s = 0;
+                                    if (sel_line >= diskinfo_scroll + diskinfo_visible)
+                                        diskinfo_scroll = sel_line - diskinfo_visible + 1;
+                                    if (diskinfo_scroll > max_s) diskinfo_scroll = max_s;
+                                }
+                            } else {
+                                if (diskinfo_sel_dir < diskinfo_dir_count - 1) {
+                                    diskinfo_sel_dir++;
+                                    int sel_line = diskinfo_sel_dir * 2;
+                                    int max_s = diskinfo_line_count - diskinfo_visible;
+                                    if (max_s < 0) max_s = 0;
+                                    if (sel_line >= diskinfo_scroll + diskinfo_visible)
+                                        diskinfo_scroll = sel_line - diskinfo_visible + 1;
+                                    if (diskinfo_scroll > max_s) diskinfo_scroll = max_s;
+                                }
+                            }
+                        } else if (btn == cfg.k_confirm && !diskinfo_scanning) {
+                            if (diskinfo_mode == 0 && diskinfo_part_count > 0) {
+                                // Extract mount path from header line: "PATH  [fstype]"
+                                char mount[256];
+                                strncpy(mount, diskinfo_lines[diskinfo_part_lines[diskinfo_sel_part]], 255);
+                                char *sp = strchr(mount, ' ');
+                                if (sp) *sp = '\0';
+                                strncpy(diskinfo_drillpath, mount, 255);
+                                diskinfo_mode  = 1;
+                                diskinfo_depth = 0;
+                                populate_diskinfo_drill(diskinfo_drillpath);
+                            } else if (diskinfo_mode == 1 && diskinfo_sel_dir < diskinfo_dir_count) {
+                                // Drill into selected subdirectory — save position first
+                                if (diskinfo_depth < DISKINFO_DEPTH_MAX) {
+                                    strncpy(diskinfo_pathstack[diskinfo_depth], diskinfo_drillpath, 255);
+                                    diskinfo_selstack[diskinfo_depth]    = diskinfo_sel_dir;
+                                    diskinfo_scrollstack[diskinfo_depth] = diskinfo_scroll;
+                                    diskinfo_depth++;
+                                }
+                                strncpy(diskinfo_drillpath,
+                                        diskinfo_dir_paths[diskinfo_sel_dir], 255);
+                                populate_diskinfo_drill(diskinfo_drillpath);
+                            }
+                        } else if (btn == cfg.k_back) {
+                            if (diskinfo_scanning) {
+                                // Cancel scan and return to partition list
+                                diskinfo_abort_scan();
+                                populate_diskinfo();
+                            } else if (diskinfo_depth > 0) {
+                                // Go up one directory level — restore saved position
+                                diskinfo_depth--;
+                                strncpy(diskinfo_drillpath,
+                                        diskinfo_pathstack[diskinfo_depth], 255);
+                                populate_diskinfo_drill(diskinfo_drillpath);
+                                diskinfo_sel_dir = diskinfo_selstack[diskinfo_depth];
+                                diskinfo_scroll  = diskinfo_scrollstack[diskinfo_depth];
+                            } else if (diskinfo_mode == 1) {
+                                // Return to partition list
+                                populate_diskinfo();
+                            } else {
+                                diskinfo_active = false;
+                            }
+                        } else if (!diskinfo_scanning) {
                             diskinfo_active = false;
                         }
                     // ── File ops submenu ──────────────────────────────────────
@@ -2474,6 +2990,7 @@ int main(int argc, char *argv[]) {
                             } else if (sel == TOPMENU_ABOUT) {
                                 about_active = true;
                             } else if (sel == TOPMENU_DISKINFO) {
+                                diskinfo_cache_clear();
                                 populate_diskinfo();
                                 diskinfo_active = true;
                             } else if (sel == TOPMENU_EXIT) {
@@ -3055,6 +3572,9 @@ int main(int argc, char *argv[]) {
         // Paste conflict overlay (on top of context menu)
         if (current_mode == MODE_CONTEXT_MENU && paste_conflict_active)
             draw_paste_conflict();
+
+        // Copy/move progress overlay (topmost — blocks all other interaction)
+        if (paste_running) draw_paste_progress();
 
         // Action chooser overlay
         if (current_mode == MODE_VIEW_CHOOSE) draw_open_chooser();

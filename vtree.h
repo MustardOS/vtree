@@ -158,6 +158,15 @@ typedef struct {
 } Clipboard;
 extern Clipboard clip;
 
+// Paste progress — written by paste_thread_fn/copy_file_data, read by render thread
+extern volatile bool      paste_abort;
+extern volatile long long paste_bytes_done;
+extern volatile long long paste_bytes_total;
+extern volatile int       paste_files_done;   // individual files completed (not clipboard items)
+extern volatile int       paste_files_total;  // total files to copy (counted before copy starts)
+extern char               paste_prog_name[MAX_PATH];  // current filename being copied (updated per-file)
+extern char               paste_copy_root[MAX_PATH];  // src root for computing relative display paths
+
 // config.c
 void load_config();
 void save_config();
@@ -167,6 +176,7 @@ void apply_theme_preset(int idx);       // applies named_themes[idx]
 void  load_dir(int p_idx, const char *path);
 int   copy_path(const char *src, const char *dest);
 int   delete_path(const char *path);
+int   count_files(const char *path);
 char *trim(char *str);
 void  format_size(long long bytes, char *out);
 void  join_path(char *out, const char *dir, const char *name);

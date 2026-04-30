@@ -51,6 +51,20 @@ void apply_theme_preset(int idx) {
     cfg.theme = named_themes[idx].colors;
 }
 
+// Apply "Dark" by name if present, otherwise the first available theme.
+// Used when no ActiveTheme is specified — readdir order is not alphabetical,
+// so apply_theme_preset(0) would pick a random theme.
+static void apply_default_theme(void) {
+    for (int i = 0; i < named_theme_count; i++) {
+        if (strcmp(named_themes[i].name, "Dark") == 0) {
+            apply_theme_preset(i);
+            return;
+        }
+    }
+    if (named_theme_count > 0)
+        apply_theme_preset(0);
+}
+
 // ---------------------------------------------------------------------------
 // Shared path helper: resolves a sibling file next to the executable via
 // /proc/self/exe; falls back to CWD filename if that fails.
@@ -71,15 +85,14 @@ static void get_sibling_path(const char *filename, char *out) {
 }
 
 // Convenience wrapper for the primary config file
-static void get_config_path(char *out) { 
+static void get_config_path(char *out) {
   if (access(configfile, F_OK) == 0) {
     strncpy(out, configfile, MAX_PATH - 1);
     out[MAX_PATH - 1] = '\0';
-    vtree_log("Using configuration file from command line: %s\n", configfile);
   } else {
     get_sibling_path("config.ini", out);
-    vtree_log("Using configuration file from current directory: %s\n", "./config.ini");
   }
+  vtree_log("Using configuration file: %s\n", out);
 }
 
 // ---------------------------------------------------------------------------
@@ -217,8 +230,17 @@ static void load_themes_from_dir(const char *dir_path) {
 // ---------------------------------------------------------------------------
 void load_config() {
     // ── Defaults ─────────────────────────────────────────────────────────────
-    cfg.screen_w         = 0;   // 0 = not set; resolved after parsing
-    cfg.screen_h         = 0;
+    // Auto-detect display resolution first; config.ini ScreenWidth/Height override if > 0
+    {
+        SDL_DisplayMode dm;
+        if (SDL_GetCurrentDisplayMode(0, &dm) == 0 && dm.w > 0 && dm.h > 0) {
+            cfg.screen_w = dm.w;
+            cfg.screen_h = dm.h;
+        } else {
+            cfg.screen_w = 640;
+            cfg.screen_h = 480;
+        }
+    }
     cfg.font_size_list   = 18;
     cfg.font_size_header = 14;
     cfg.font_size_footer = 14;
@@ -314,8 +336,8 @@ void load_config() {
     // ── Main config.ini parse (non-theme keys + legacy inline [Theme]) ─────────
     FILE *f = fopen(config_path, "r");
     if (!f) {
-        // No config file — apply first available theme and return
-        apply_theme_preset(0);
+        // No config file — apply Dark (or first available theme) and return
+        apply_default_theme();
         return;
     }
 
@@ -438,21 +460,16 @@ void load_config() {
     }
     fclose(f);
 
-    // If no [ActiveTheme] line matched, apply the first available theme
-    if (current_named_theme < 0 && named_theme_count > 0)
-        apply_theme_preset(0);
+    // Clamp font sizes — atoi("0") would crash TTF_OpenFont
+    if (cfg.font_size_list   < 8) cfg.font_size_list   = 8;
+    if (cfg.font_size_header < 8) cfg.font_size_header = 8;
+    if (cfg.font_size_footer < 8) cfg.font_size_footer = 8;
+    if (cfg.font_size_menu   < 8) cfg.font_size_menu   = 8;
+    if (cfg.font_size_hex    < 8) cfg.font_size_hex    = 8;
 
-    // Resolve screen size — use display resolution on first launch (no saved value)
-    if (cfg.screen_w <= 0 || cfg.screen_h <= 0) {
-        SDL_DisplayMode dm;
-        if (SDL_GetCurrentDisplayMode(0, &dm) == 0 && dm.w > 0 && dm.h > 0) {
-            cfg.screen_w = dm.w;
-            cfg.screen_h = dm.h;
-        } else {
-            cfg.screen_w = 640;   // safe fallback if SDL can't query the display
-            cfg.screen_h = 480;
-        }
-    }
+    // If no [ActiveTheme] line matched, apply Dark (or first available theme)
+    if (current_named_theme < 0)
+        apply_default_theme();
 }
 
 // ---------------------------------------------------------------------------

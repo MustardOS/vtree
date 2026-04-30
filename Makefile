@@ -22,7 +22,7 @@ CFLAGS_COMMON := -Wall -Wextra -std=c99 $(SDL2_CFLAGS) \
                  -DSDL_MAIN_HANDLED \
                  -D_POSIX_C_SOURCE=200809L
 
-LIBS := $(SDL2_LIBS) -lSDL2_ttf -lSDL2_image -lm
+LIBS := $(SDL2_LIBS) -lSDL2_ttf -lSDL2_image -lm -lpthread
 
 # Debug (default)
 CFLAGS  := $(CFLAGS_COMMON) -g -O0 -fsanitize=address,undefined

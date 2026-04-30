@@ -10,7 +10,7 @@ echo "Packaging vTree Gold v${VERSION}..."
 rm -rf "$FOLDER"
 mkdir -p "$FOLDER"
 
-cp vtree config.ini mux_launch.sh mux_lang.ini LICENSE OFL.txt README.md "$FOLDER/"
+cp vtree config.ini.example mux_launch.sh mux_lang.ini LICENSE OFL.txt README.md "$FOLDER/"
 cp -r res fonts glyph lang theme "$FOLDER/"
 
 zip -r "${ARCHIVE}.zip" "$FOLDER"
