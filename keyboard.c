@@ -170,6 +170,8 @@ void osk_confirm(void) {
             strncpy(osk_path_target, osk.buf, MAX_PATH - 1);
         osk_path_target = NULL;
         current_mode    = MODE_SETTINGS;
+    } else if (osk_purpose == OSK_FOR_TV_SEARCH) {
+        viewer_search_commit(osk.buf);  // sets current_mode = MODE_VIEW_TEXT
     } else { // OSK_FOR_TEXT_EDIT
         viewer_osk_commit(osk.buf);
     }
@@ -226,6 +228,18 @@ void osk_enter_tv(const char *line_text) {
     osk.cursor = osk.len;
     osk_init_common();
     osk_purpose  = OSK_FOR_TEXT_EDIT;
+    current_mode = MODE_OSK;
+}
+
+// Entry point for viewer search input (pre-filled with last query)
+void osk_enter_search(const char *query) {
+    memset(&osk, 0, sizeof(osk));
+    strncpy(osk.buf,       query, 255); osk.buf[255] = '\0';
+    strncpy(osk.orig_name, query, 255); osk.orig_name[255] = '\0';
+    osk.len    = (int)strlen(osk.buf);
+    osk.cursor = osk.len;
+    osk_init_common();
+    osk_purpose  = OSK_FOR_TV_SEARCH;
     current_mode = MODE_OSK;
 }
 
@@ -357,6 +371,7 @@ void draw_osk(void) {
         (osk_purpose == OSK_FOR_NEW_FILE)     ? tr("OSK_Title_NewFile")   :
         (osk_purpose == OSK_FOR_NEW_DIR)      ? tr("OSK_Title_NewFolder") :
         (osk_purpose == OSK_FOR_SETTINGS_PATH)? tr("OSK_Title_Settings")  :
+        (osk_purpose == OSK_FOR_TV_SEARCH)    ? tr("OSK_Title_Search")    :
                                                 tr("OSK_Title_EditLine");
     draw_txt(font_header, title_lbl, cx, y, cfg.theme.text);
 

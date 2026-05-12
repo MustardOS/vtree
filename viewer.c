@@ -54,6 +54,15 @@ static TextViewState tv;
 static bool   tv_osk_pending = false;   // OSK was opened for a line edit
 static int    tv_osk_line    = -1;      // which line is being edited
 
+// Search state
+static char  tv_search_query[256];
+static int   tv_search_results[TV_MAX_LINES];
+static int   tv_search_count    = 0;
+static int   tv_search_idx      = -1;
+static bool  tv_search_no_match = false;
+static bool  tv_search_osk_pending = false;
+static bool  tv_search_case     = false;  // false = case-insensitive (default); persists across files
+
 // Line-ops menu state
 static bool tv_menu_open   = false;
 static int  tv_menu_sel    = 0;         // 0=New Line, 1=Duplicate, 2=Delete
@@ -73,6 +82,16 @@ static int tv_visible_lines(void) {
     int head_h = cfg.font_size_header + 12;
     int foot_h = cfg.font_size_footer + 16;
     return (cfg.screen_h - head_h - foot_h) / tv_item_h();
+}
+
+// Sync search index to the last match at or before cur_line
+static void tv_sync_search_idx(void) {
+    if (tv_search_count == 0) return;
+    tv_search_idx = 0;
+    for (int i = 0; i < tv_search_count; i++) {
+        if (tv_search_results[i] <= tv.cur_line) tv_search_idx = i;
+        else break;
+    }
 }
 
 // Clamp scroll so cursor is always visible
@@ -140,6 +159,11 @@ void viewer_open(const char *path) {
     tv_osk_line   = -1;
     tv_menu_open   = false;
     tv_confirm_del = false;
+    tv_search_query[0]  = '\0';
+    tv_search_count     = 0;
+    tv_search_idx       = -1;
+    tv_search_no_match  = false;
+    tv_search_osk_pending = false;
 
     // Read file via standard I/O (no LOVE2D dependency)
     FILE *f = fopen(path, "rb");
@@ -179,6 +203,11 @@ void viewer_close(void) {
     tv_osk_pending = false;
     tv_menu_open   = false;
     tv_confirm_del = false;
+    tv_search_query[0]  = '\0';
+    tv_search_count     = 0;
+    tv_search_idx       = -1;
+    tv_search_no_match  = false;
+    tv_search_osk_pending = false;
 }
 
 // Called from main.c after the OSK completes a line edit (commit)
@@ -203,6 +232,71 @@ int  viewer_osk_line_index(void) { return tv_osk_line; }
 const char *viewer_get_line(int idx) {
     if (idx < 0 || idx >= tv.line_count) return "";
     return tv.lines[idx];
+}
+
+bool        viewer_search_osk_is_pending(void) {
+    if (!tv_search_osk_pending) return false;
+    tv_search_osk_pending = false;  // consume — prevents re-trigger after OSK cancel
+    return true;
+}
+const char *viewer_search_current_query(void)  { return tv_search_query; }
+
+void viewer_search_commit(const char *query) {
+    tv_search_osk_pending = false;
+    if (!query || query[0] == '\0') {
+        tv_search_query[0] = '\0';
+        tv_search_count    = 0;
+        tv_search_idx      = -1;
+        tv_search_no_match = false;
+        current_mode       = MODE_VIEW_TEXT;
+        return;
+    }
+
+    bool same_query = (strcmp(query, tv_search_query) == 0);
+    strncpy(tv_search_query, query, 255);
+    tv_search_query[255] = '\0';
+
+    // Rebuild match list
+    size_t qlen = strlen(tv_search_query);
+    int (*cmp)(const char *, const char *, size_t) = tv_search_case ? strncmp : strncasecmp;
+    tv_search_count = 0;
+    for (int i = 0; i < tv.line_count && tv_search_count < TV_MAX_LINES; i++) {
+        const char *p = tv.lines[i];
+        bool found = false;
+        while (*p && !found) {
+            if (cmp(p, tv_search_query, qlen) == 0) found = true;
+            else p++;
+        }
+        if (found) tv_search_results[tv_search_count++] = i;
+    }
+
+    if (tv_search_count == 0) {
+        tv_search_idx      = -1;
+        tv_search_no_match = true;
+        current_mode       = MODE_VIEW_TEXT;
+        return;
+    }
+
+    tv_search_no_match = false;
+    if (same_query) {
+        // Advance to next match after current cursor line (wrap)
+        int next = -1;
+        for (int i = 0; i < tv_search_count; i++) {
+            if (tv_search_results[i] > tv.cur_line) { next = i; break; }
+        }
+        tv_search_idx = (next >= 0) ? next : 0;
+    } else {
+        // Find first match at or after current cursor line
+        int first = 0;
+        for (int i = 0; i < tv_search_count; i++) {
+            if (tv_search_results[i] >= tv.cur_line) { first = i; break; }
+        }
+        tv_search_idx = first;
+    }
+
+    tv.cur_line = tv_search_results[tv_search_idx];
+    tv_clamp_scroll();
+    current_mode = MODE_VIEW_TEXT;
 }
 
 // ---------------------------------------------------------------------------
@@ -247,11 +341,12 @@ static void tv_op_delete_line(void) {
 // Menu overlay draw (called from viewer_draw when tv_menu_open)
 // ---------------------------------------------------------------------------
 
-#define TV_MENU_ITEMS 3
+#define TV_MENU_ITEMS 4
 static const char *tv_menu_labels[TV_MENU_ITEMS] = {
     "Viewer_MenuNewLine",
     "Viewer_MenuDuplicate",
     "Viewer_MenuDelete",
+    "Viewer_MenuSearch",
 };
 
 static void tv_draw_menu(void) {
@@ -370,6 +465,10 @@ void viewer_handle_button(SDL_GameControllerButton btn,
                 } else {
                     tv_confirm_del = true;  // non-empty — ask first
                 }
+            } else if (tv_menu_sel == 3) {  // Search
+                tv_search_osk_pending = true;
+                tv_search_no_match    = false;
+                tv_menu_open          = false;
             }
         }
         return;
@@ -377,6 +476,12 @@ void viewer_handle_button(SDL_GameControllerButton btn,
 
     if (btn == cfg.k_back) {
         current_mode = MODE_EXPLORER;
+        return;
+    }
+
+    if (btn == cfg.k_menu && tv.read_only) {
+        tv_search_osk_pending = true;
+        tv_search_no_match    = false;
         return;
     }
 
@@ -401,35 +506,67 @@ void viewer_handle_button(SDL_GameControllerButton btn,
         return;
     }
 
+    if (btn == SDL_CONTROLLER_BUTTON_X) {
+        tv_search_case     = !tv_search_case;
+        tv_search_no_match = false;
+        if (tv_search_query[0] != '\0')
+            viewer_search_commit(tv_search_query);
+        return;
+    }
+
     if (btn == SDL_CONTROLLER_BUTTON_DPAD_UP) {
         tv.cur_line--;
         if (tv.cur_line < 0) tv.cur_line = 0;
         tv_clamp_scroll();
+        tv_sync_search_idx();
     }
     else if (btn == SDL_CONTROLLER_BUTTON_DPAD_DOWN) {
         tv.cur_line++;
         if (tv.cur_line >= tv.line_count) tv.cur_line = tv.line_count - 1;
         tv_clamp_scroll();
+        tv_sync_search_idx();
     }
     else if (btn == cfg.k_pgup) {
         int vis = tv_visible_lines();
         tv.top_line = SDL_max(0, tv.top_line - vis);
-        tv.cur_line = SDL_min(tv.line_count - 1, tv.top_line + vis - 1);
+        tv.cur_line = tv.top_line;
         tv_clamp_scroll();
+        tv_sync_search_idx();
     }
     else if (btn == cfg.k_pgdn) {
         int vis = tv_visible_lines();
         tv.top_line = SDL_min(SDL_max(0, tv.line_count - vis), tv.top_line + vis);
         tv.cur_line = tv.top_line;
         tv_clamp_scroll();
+        tv_sync_search_idx();
     }
-    else if (btn == SDL_CONTROLLER_BUTTON_DPAD_LEFT && !tv.modified) {
-        int step = (font_list ? TTF_FontHeight(font_list) : cfg.font_size_list) * 4;
-        tv.x_off = SDL_max(0, tv.x_off - step);
+    else if (btn == SDL_CONTROLLER_BUTTON_DPAD_LEFT) {
+        if (tv_search_count > 0) {
+            int prev = tv_search_count - 1;
+            for (int i = tv_search_count - 1; i >= 0; i--) {
+                if (tv_search_results[i] < tv.cur_line) { prev = i; break; }
+            }
+            tv_search_idx = prev;
+            tv.cur_line   = tv_search_results[prev];
+            tv_clamp_scroll();
+        } else if (!tv.modified) {
+            int step = (font_list ? TTF_FontHeight(font_list) : cfg.font_size_list) * 4;
+            tv.x_off = SDL_max(0, tv.x_off - step);
+        }
     }
-    else if (btn == SDL_CONTROLLER_BUTTON_DPAD_RIGHT && !tv.modified) {
-        int step = (font_list ? TTF_FontHeight(font_list) : cfg.font_size_list) * 4;
-        tv.x_off += step;
+    else if (btn == SDL_CONTROLLER_BUTTON_DPAD_RIGHT) {
+        if (tv_search_count > 0) {
+            int next = 0;
+            for (int i = 0; i < tv_search_count; i++) {
+                if (tv_search_results[i] > tv.cur_line) { next = i; break; }
+            }
+            tv_search_idx = next;
+            tv.cur_line   = tv_search_results[next];
+            tv_clamp_scroll();
+        } else if (!tv.modified) {
+            int step = (font_list ? TTF_FontHeight(font_list) : cfg.font_size_list) * 4;
+            tv.x_off += step;
+        }
     }
 }
 
@@ -489,6 +626,20 @@ void viewer_draw(void) {
             SDL_Rect ar = {0, ry, cfg.screen_w, item_h};
             SDL_RenderFillRect(renderer, &ar);
         }
+        // Search match tint (drawn before cursor highlight so cursor wins)
+        if (tv_search_count > 0 && li != tv.cur_line) {
+            bool is_match = false;
+            for (int m = 0; m < tv_search_count; m++)
+                if (tv_search_results[m] == li) { is_match = true; break; }
+            if (is_match) {
+                SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+                SDL_SetRenderDrawColor(renderer,
+                    cfg.theme.marked.r, cfg.theme.marked.g, cfg.theme.marked.b, 60);
+                SDL_Rect sr = {0, ry, cfg.screen_w, item_h};
+                SDL_RenderFillRect(renderer, &sr);
+                SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
+            }
+        }
         // Cursor row highlight
         if (li == tv.cur_line) {
             SDL_SetRenderDrawColor(renderer,
@@ -522,14 +673,40 @@ void viewer_draw(void) {
     const char *lbl_pgdn = btn_label(cfg.k_pgdn);
     const char *lbl_conf = btn_label(cfg.k_confirm);
     const char *lbl_back = btn_label(cfg.k_back);
-    if (tv.read_only)
-        snprintf(hint, sizeof(hint), tr("Viewer_HintReadOnly"), lbl_pgup, lbl_pgdn, lbl_back);
+    const char *lbl_menu = btn_label(cfg.k_menu);
+    const char *lbl_x = btn_label(SDL_CONTROLLER_BUTTON_X);
+    if (tv_search_count > 0)
+        snprintf(hint, sizeof(hint), tr("Viewer_HintSearch"), lbl_x, lbl_back);
+    else if (tv.read_only)
+        snprintf(hint, sizeof(hint), tr("Viewer_HintReadOnly"), lbl_pgup, lbl_pgdn, lbl_menu, lbl_back);
     else if (tv.modified)
         snprintf(hint, sizeof(hint), tr("Viewer_HintModified"), lbl_pgup, lbl_pgdn, lbl_conf, lbl_back);
     else
         snprintf(hint, sizeof(hint), tr("Viewer_HintEdit"), lbl_pgup, lbl_pgdn, lbl_conf, lbl_back);
     draw_txt_clipped(font_footer, hint, 8, cfg.screen_h - foot_h + (foot_h - cfg.font_size_footer) / 2,
              cfg.screen_w - 16, cfg.theme.text);
+
+    // Search status + case indicator — right-aligned in footer (always shown)
+    {
+        const char *case_lbl = tv_search_case ? "Aa" : "aa";
+        char srch[80];
+        if (tv_search_no_match)
+            snprintf(srch, sizeof(srch), "%s · %s", tr("Viewer_SearchNotFound"), case_lbl);
+        else if (tv_search_count > 0) {
+            char cnt[32];
+            snprintf(cnt, sizeof(cnt), tr("Viewer_SearchResult"), tv_search_idx + 1, tv_search_count);
+            snprintf(srch, sizeof(srch), "%s · %s", cnt, case_lbl);
+        } else {
+            snprintf(srch, sizeof(srch), "%s", case_lbl);
+        }
+        SDL_Color sc = (tv_search_count > 0)  ? cfg.theme.marked :
+                       tv_search_no_match      ? cfg.theme.text_disabled :
+                       tv_search_case          ? cfg.theme.marked : cfg.theme.text_disabled;
+        int sw = 0; if (font_footer) TTF_SizeText(font_footer, srch, &sw, NULL);
+        draw_txt(font_footer, srch,
+                 cfg.screen_w - sw - 8,
+                 cfg.screen_h - foot_h + (foot_h - cfg.font_size_footer) / 2, sc);
+    }
 
     if (tv_menu_open)
         tv_draw_menu();

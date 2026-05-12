@@ -18,7 +18,7 @@
 // ---------------------------------------------------------------------------
 // Version
 // ---------------------------------------------------------------------------
-#define VTREE_VERSION "1.3"
+#define VTREE_VERSION "1.4"
 
 // ---------------------------------------------------------------------------
 // Globals
@@ -2483,10 +2483,13 @@ int main(int argc, char *argv[]) {
     bool   osk_bksp_held   = false;   // backspace auto-repeat in OSK
     // Dedicated OSK caret held flags — separate from dpad so they never alias
     bool   osk_cur_l_held  = false, osk_cur_r_held  = false;
+    // Viewer page-up / page-down hold-repeat
+    bool   tv_pgup_held    = false, tv_pgdn_held    = false;
     Uint32 next_up_tick    = 0, next_down_tick   = 0;
     Uint32 next_left_tick  = 0, next_right_tick  = 0;
     Uint32 next_bksp_tick  = 0;
     Uint32 next_cur_l_tick = 0, next_cur_r_tick  = 0;
+    Uint32 next_tv_pgup_tick = 0, next_tv_pgdn_tick = 0;
     const Uint32 REPEAT_DELAY = 400, REPEAT_RATE = 60;
 
     while (running) {
@@ -2521,6 +2524,8 @@ int main(int argc, char *argv[]) {
                 if (b == cfg.osk_k_bksp)                      osk_bksp_held   = false;
                 if (b == SDL_CONTROLLER_BUTTON_LEFTSHOULDER)  osk_cur_l_held  = false;
                 if (b == SDL_CONTROLLER_BUTTON_RIGHTSHOULDER) osk_cur_r_held  = false;
+                if (b == cfg.k_pgup)                          tv_pgup_held    = false;
+                if (b == cfg.k_pgdn)                          tv_pgdn_held    = false;
                 // R1 release on about screen: dismiss if combo wasn't triggered
                 if (b == SDL_CONTROLLER_BUTTON_RIGHTSHOULDER && about_active) {
                     if (!about_combo_fired) about_active = false;
@@ -2538,6 +2543,8 @@ int main(int argc, char *argv[]) {
                 if (b == cfg.osk_k_bksp)                      osk_bksp_held   = false;
                 if (b == SDL_CONTROLLER_BUTTON_LEFTSHOULDER)  osk_cur_l_held  = false;
                 if (b == SDL_CONTROLLER_BUTTON_RIGHTSHOULDER) osk_cur_r_held  = false;
+                if (b == cfg.k_pgup)                          tv_pgup_held    = false;
+                if (b == cfg.k_pgdn)                          tv_pgdn_held    = false;
                 if (b == SDL_CONTROLLER_BUTTON_RIGHTSHOULDER && about_active) {
                     if (!about_combo_fired) about_active = false;
                     about_r1_held = about_dpad_up_held = about_combo_fired = false;
@@ -2592,6 +2599,7 @@ int main(int argc, char *argv[]) {
                         int new_top = SDL_max(0, s->scroll_offset - page);
                         s->scroll_offset  = new_top;
                         s->selected_index = new_top;
+                        tv_pgup_held = true; next_tv_pgup_tick = now + REPEAT_DELAY;
                     } else if (btn == cfg.k_pgdn) {
                         int item_h = (font_list ? TTF_FontHeight(font_list) : cfg.font_size_list) + 6;
                         int head_h = cfg.font_size_header + 12;
@@ -2600,6 +2608,7 @@ int main(int argc, char *argv[]) {
                         int new_top = SDL_min(SDL_max(0, s->file_count - page), s->scroll_offset + page);
                         s->scroll_offset  = new_top;
                         s->selected_index = SDL_min(s->file_count - 1, new_top + page - 1);
+                        tv_pgdn_held = true; next_tv_pgdn_tick = now + REPEAT_DELAY;
                     } else if (btn == SDL_CONTROLLER_BUTTON_DPAD_UP) {
                         if (s->selected_index > 0) s->selected_index--;
                         else if (s->file_count > 0) s->selected_index = s->file_count - 1;
@@ -3109,6 +3118,8 @@ int main(int argc, char *argv[]) {
                         if (osk_purpose == OSK_FOR_TEXT_EDIT) {
                             viewer_close();
                             current_mode = MODE_VIEW_TEXT;
+                        } else if (osk_purpose == OSK_FOR_TV_SEARCH) {
+                            current_mode = MODE_VIEW_TEXT;
                         } else if (osk_purpose == OSK_FOR_SETTINGS_PATH) {
                             osk_path_target = NULL;
                             current_mode    = MODE_SETTINGS;
@@ -3209,9 +3220,14 @@ int main(int argc, char *argv[]) {
                     if (btn == SDL_CONTROLLER_BUTTON_DPAD_DOWN)  { dpad_down_held  = true; next_down_tick  = now + REPEAT_DELAY; }
                     if (btn == SDL_CONTROLLER_BUTTON_DPAD_LEFT)  { dpad_left_held  = true; next_left_tick  = now + REPEAT_DELAY; }
                     if (btn == SDL_CONTROLLER_BUTTON_DPAD_RIGHT) { dpad_right_held = true; next_right_tick = now + REPEAT_DELAY; }
+                    if (btn == cfg.k_pgup) { tv_pgup_held = true; next_tv_pgup_tick = now + REPEAT_DELAY; }
+                    if (btn == cfg.k_pgdn) { tv_pgdn_held = true; next_tv_pgdn_tick = now + REPEAT_DELAY; }
                     if (viewer_osk_is_pending()) {
                         int li = viewer_osk_line_index();
                         osk_enter_tv(viewer_get_line(li));
+                    }
+                    if (viewer_search_osk_is_pending()) {
+                        osk_enter_search(viewer_search_current_query());
                     }
 
                 // ── HEX VIEWER / EDITOR ───────────────────────────────────────
@@ -3318,6 +3334,37 @@ int main(int argc, char *argv[]) {
             if (current_mode == MODE_OSK) osk_cursor_right();
             next_cur_r_tick = now + REPEAT_RATE;
         }
+        // Page-up / page-down hold-repeat (viewer and file browser)
+        if (tv_pgup_held && now >= next_tv_pgup_tick) {
+            if (current_mode == MODE_VIEW_TEXT) {
+                viewer_handle_button(cfg.k_pgup, NULL, NULL, NULL, NULL, now);
+            } else if (current_mode == MODE_EXPLORER) {
+                AppState *rs = &panes[active_pane];
+                int item_h = (font_list ? TTF_FontHeight(font_list) : cfg.font_size_list) + 6;
+                int head_h = cfg.font_size_header + 12;
+                int foot_h = cfg.font_size_footer + 16;
+                int page   = SDL_max(1, (cfg.screen_h - head_h - foot_h) / item_h);
+                int new_top = SDL_max(0, rs->scroll_offset - page);
+                rs->scroll_offset  = new_top;
+                rs->selected_index = new_top;
+            }
+            next_tv_pgup_tick = now + VIEWER_RATE;
+        }
+        if (tv_pgdn_held && now >= next_tv_pgdn_tick) {
+            if (current_mode == MODE_VIEW_TEXT) {
+                viewer_handle_button(cfg.k_pgdn, NULL, NULL, NULL, NULL, now);
+            } else if (current_mode == MODE_EXPLORER) {
+                AppState *rs = &panes[active_pane];
+                int item_h = (font_list ? TTF_FontHeight(font_list) : cfg.font_size_list) + 6;
+                int head_h = cfg.font_size_header + 12;
+                int foot_h = cfg.font_size_footer + 16;
+                int page   = SDL_max(1, (cfg.screen_h - head_h - foot_h) / item_h);
+                int new_top = SDL_min(SDL_max(0, rs->file_count - page), rs->scroll_offset + page);
+                rs->scroll_offset  = new_top;
+                rs->selected_index = SDL_min(rs->file_count - 1, new_top + page - 1);
+            }
+            next_tv_pgdn_tick = now + VIEWER_RATE;
+        }
 
         glyph_frame++;
 
@@ -3328,7 +3375,7 @@ int main(int argc, char *argv[]) {
         if (current_mode == MODE_VIEW_TEXT) {
             viewer_draw(); present_frame(); continue;
         }
-        if (current_mode == MODE_OSK && osk_purpose == OSK_FOR_TEXT_EDIT) {
+        if (current_mode == MODE_OSK && (osk_purpose == OSK_FOR_TEXT_EDIT || osk_purpose == OSK_FOR_TV_SEARCH)) {
             viewer_draw(); draw_osk(); present_frame(); continue;
         }
         if (current_mode == MODE_VIEW_HEX) {

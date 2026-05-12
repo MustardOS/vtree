@@ -26,7 +26,7 @@ typedef enum {
 } AppMode;
 typedef enum { OP_NONE, OP_COPY, OP_CUT } FileOp;
 typedef enum { OSK_LOWER, OSK_UPPER, OSK_SPECIAL, OSK_LAYER_COUNT } OSKLayer;
-typedef enum { OSK_FOR_RENAME, OSK_FOR_TEXT_EDIT, OSK_FOR_NEW_FILE, OSK_FOR_NEW_DIR, OSK_FOR_SETTINGS_PATH } OSKPurpose;
+typedef enum { OSK_FOR_RENAME, OSK_FOR_TEXT_EDIT, OSK_FOR_NEW_FILE, OSK_FOR_NEW_DIR, OSK_FOR_SETTINGS_PATH, OSK_FOR_TV_SEARCH } OSKPurpose;
 
 typedef struct {
     char     buf[256];      // text buffer
@@ -209,6 +209,9 @@ void        viewer_handle_button(SDL_GameControllerButton btn, bool *dpad_up_hel
                                  bool *dpad_left_held, bool *dpad_right_held, Uint32 now);
 void        viewer_handle_repeat(Uint32 now);
 void        viewer_draw(void);
+bool        viewer_search_osk_is_pending(void);
+const char *viewer_search_current_query(void);
+void        viewer_search_commit(const char *query);
 
 // hexview.c — hex viewer / editor
 void hexview_open(const char *path);
@@ -223,6 +226,7 @@ const char *btn_label(SDL_GameControllerButton btn);
 void osk_init_common(void);
 void osk_enter(const char *dir, const char *filename);
 void osk_enter_tv(const char *line_text);
+void osk_enter_search(const char *query);
 void osk_enter_new(const char *dir, bool is_dir);
 void osk_enter_path(char *target, const char *current_val);
 extern char *osk_path_target;
