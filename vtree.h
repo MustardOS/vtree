@@ -107,6 +107,7 @@ typedef struct {
     bool remember_dirs;  // save pane paths on exit and restore on next launch
     bool exec_scripts;   // allow executing .sh files (experimental)
     bool single_pane;    // show only one full-width pane instead of the split view
+    bool paste_to_opposite; // skip dest dialog and always paste into the non-active pane
     bool two_menu_mode;  // k_menu goes to file-ops directly; k_menu2 opens system menu
     bool tint_icons;     // tint file-list icons to match their row's theme colour
     bool ui_sounds;      // play subtle programmatic UI sounds

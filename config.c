@@ -256,7 +256,8 @@ void load_config() {
     cfg.show_hidden   = false;
     cfg.remember_dirs = false;
     cfg.exec_scripts  = false;
-    cfg.single_pane   = false;
+    cfg.single_pane        = false;
+    cfg.paste_to_opposite  = false;
     cfg.tint_icons    = true;
     cfg.ui_sounds     = true;
     cfg.rotation      = 0;
@@ -380,7 +381,8 @@ void load_config() {
         else if (strcmp(k, "ShowHidden")   == 0) cfg.show_hidden   = (strcmp(v,"true")==0 || strcmp(v,"1")==0);
         else if (strcmp(k, "RememberDirs") == 0) cfg.remember_dirs = (strcmp(v,"true")==0 || strcmp(v,"1")==0);
         else if (strcmp(k, "ExecScripts")  == 0) cfg.exec_scripts  = (strcmp(v,"true")==0 || strcmp(v,"1")==0);
-        else if (strcmp(k, "SinglePane")   == 0) cfg.single_pane   = (strcmp(v,"true")==0 || strcmp(v,"1")==0);
+        else if (strcmp(k, "SinglePane")      == 0) cfg.single_pane      = (strcmp(v,"true")==0 || strcmp(v,"1")==0);
+        else if (strcmp(k, "PasteToOpposite") == 0) cfg.paste_to_opposite = (strcmp(v,"true")==0 || strcmp(v,"1")==0);
         else if (strcmp(k, "TwoMenuMode")  == 0) cfg.two_menu_mode = (strcmp(v,"true")==0 || strcmp(v,"1")==0);
         else if (strcmp(k, "TintIcons")    == 0) cfg.tint_icons    = (strcmp(v,"true")==0 || strcmp(v,"1")==0);
         else if (strcmp(k, "UISounds")     == 0) cfg.ui_sounds     = (strcmp(v,"true")==0 || strcmp(v,"1")==0);
@@ -483,7 +485,8 @@ void save_config() {
     fprintf(f, "ShowHidden=%s\n",   cfg.show_hidden   ? "true" : "false");
     fprintf(f, "RememberDirs=%s\n", cfg.remember_dirs ? "true" : "false");
     fprintf(f, "ExecScripts=%s\n",  cfg.exec_scripts  ? "true" : "false");
-    fprintf(f, "SinglePane=%s\n",   cfg.single_pane   ? "true" : "false");
+    fprintf(f, "SinglePane=%s\n",        cfg.single_pane        ? "true" : "false");
+    fprintf(f, "PasteToOpposite=%s\n",   cfg.paste_to_opposite  ? "true" : "false");
     fprintf(f, "TwoMenuMode=%s\n", cfg.two_menu_mode ? "true" : "false");
     fprintf(f, "TintIcons=%s\n",    cfg.tint_icons    ? "true" : "false");
     fprintf(f, "UISounds=%s\n",     cfg.ui_sounds     ? "true" : "false");

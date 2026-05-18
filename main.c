@@ -18,7 +18,7 @@
 // ---------------------------------------------------------------------------
 // Version
 // ---------------------------------------------------------------------------
-#define VTREE_VERSION "1.4"
+#define VTREE_VERSION "1.4.1"
 
 // ---------------------------------------------------------------------------
 // Globals
@@ -515,7 +515,8 @@ static SettingDef general_defs[] = {
     { "Settings_Language",     STYPE_LANG,  NULL, NULL, NULL, NULL,                         0, 0, 0, NULL },
     { "Settings_ShowHidden",   STYPE_BOOL,  NULL, &cfg.show_hidden,   NULL, NULL,           0, 0, 0, NULL },
     { "Settings_RememberDirs", STYPE_BOOL,  NULL, &cfg.remember_dirs, NULL, NULL,           0, 0, 0, NULL },
-    { "Settings_SinglePane",   STYPE_BOOL,  NULL, &cfg.single_pane,   NULL, NULL,           0, 0, 0, NULL },
+    { "Settings_SinglePane",       STYPE_BOOL,  NULL, &cfg.single_pane,        NULL, NULL, 0, 0, 0, NULL },
+    { "Settings_PasteToOpposite",  STYPE_BOOL,  NULL, &cfg.paste_to_opposite,  NULL, NULL, 0, 0, 0, NULL },
     { "Settings_TwoMenuMode",  STYPE_BOOL,  NULL, &cfg.two_menu_mode, NULL, NULL,           0, 0, 0, NULL },
     { "Settings_StartLeft",    STYPE_PATH,  NULL, NULL, NULL, cfg.start_left,               0, 0, 0, NULL },
     { "Settings_StartRight",   STYPE_PATH,  NULL, NULL, NULL, cfg.start_right,              0, 0, 0, NULL },
@@ -821,6 +822,8 @@ static void settings_adjust(int dir) {
              d->int_ptr == &cfg.font_size_menu))
             reload_fonts();
     } else if (d->type == STYPE_BOOL && d->bool_ptr) {
+        if (d->bool_ptr == &cfg.paste_to_opposite && cfg.single_pane) { /* greyed out — no-op */ }
+        else {
         *d->bool_ptr = !(*d->bool_ptr);
         vtree_log("Setting '%s': %s\n", d->label, *d->bool_ptr ? "true" : "false");
         settings_dirty = true;
@@ -834,6 +837,7 @@ static void settings_adjust(int dir) {
             settings_toast_tw   = 0;
             if (font_menu) TTF_SizeText(font_menu, settings_toast_msg, &settings_toast_tw, NULL);
         }
+        } /* end else (not greyed) */
     } else if (d->type == STYPE_CYCLE && d->int_ptr && d->opts) {
         int count = d->hi;
         *d->int_ptr = ((*d->int_ptr) + dir + count) % count;
@@ -1015,7 +1019,8 @@ static void draw_settings() {
         // Greyed label for path rows when RememberDirs is on, or keybind rows in keyboard mode
         bool greyed = (d->type == STYPE_PATH && cfg.remember_dirs) ||
                       (d->btn_ptr == &pending_keys.k_menu2 && !cfg.two_menu_mode) ||
-                      (d->type == STYPE_KEYBIND && cfg.keyboard_mode);
+                      (d->type == STYPE_KEYBIND && cfg.keyboard_mode) ||
+                      (d->bool_ptr == &cfg.paste_to_opposite && cfg.single_pane);
         SDL_Color lc = greyed ? cfg.theme.text_disabled
                               : (i == settings_index) ? cfg.theme.highlight_text : cfg.theme.text;
         draw_txt_clipped(font_list, tr(d->label), cl, y, cv - cl - 16, lc);
@@ -2901,11 +2906,20 @@ int main(int argc, char *argv[]) {
                                 }
                                 current_mode = MODE_EXPLORER;
                             } else if (filemenu_sel == FILEMENU_PASTE && clip.op != OP_NONE) {
-                                bool show_dest_dialog = !cfg.single_pane &&
+                                bool diff_paths = !cfg.single_pane &&
                                     strcmp(panes[0].current_path, panes[1].current_path) != 0;
-                                if (show_dest_dialog) {
+                                if (diff_paths && cfg.paste_to_opposite) {
+                                    paste_dest_pane      = 1 - active_pane;
+                                    paste_conflict_count = count_paste_conflicts(paste_dest_pane);
+                                    if (paste_conflict_count > 0) {
+                                        paste_conflict_active = true;
+                                        paste_conflict_sel    = 0;
+                                    } else {
+                                        do_paste(PC_OVERWRITE, paste_dest_pane);
+                                    }
+                                } else if (diff_paths) {
                                     paste_dest_active = true;
-                                    paste_dest_sel    = 0;
+                                    paste_dest_sel    = 1 - active_pane;
                                 } else {
                                     paste_dest_pane      = active_pane;
                                     paste_conflict_count = count_paste_conflicts(paste_dest_pane);
@@ -2931,9 +2945,12 @@ int main(int argc, char *argv[]) {
                                     bool diff_paths = !cfg.single_pane &&
                                         strcmp(panes[0].current_path, panes[1].current_path) != 0;
                                     if (diff_paths && p0_ok && p1_ok) {
-                                        // Both valid — let user choose destination
-                                        paste_dest_active = true;
-                                        paste_dest_sel    = 0;
+                                        if (cfg.paste_to_opposite) {
+                                            do_symlink(1 - active_pane);
+                                        } else {
+                                            paste_dest_active = true;
+                                            paste_dest_sel    = 1 - active_pane;
+                                        }
                                     } else if (diff_paths) {
                                         // Only one pane is a valid destination — route there directly
                                         do_symlink(p0_ok ? 0 : 1);
@@ -3084,10 +3101,16 @@ int main(int argc, char *argv[]) {
                             ui_sound_tab();
                         } else if (btn == SDL_CONTROLLER_BUTTON_DPAD_UP) {
                             settings_index = (settings_index - 1 + tab_n) % tab_n;
+                            if (settings_tab == 0 && cfg.single_pane &&
+                                general_defs[settings_index].bool_ptr == &cfg.paste_to_opposite)
+                                settings_index = (settings_index - 1 + tab_n) % tab_n;
                             ui_sound_navigate();
                             dpad_up_held = true; next_up_tick = now + REPEAT_DELAY;
                         } else if (btn == SDL_CONTROLLER_BUTTON_DPAD_DOWN) {
                             settings_index = (settings_index + 1) % tab_n;
+                            if (settings_tab == 0 && cfg.single_pane &&
+                                general_defs[settings_index].bool_ptr == &cfg.paste_to_opposite)
+                                settings_index = (settings_index + 1) % tab_n;
                             ui_sound_navigate();
                             dpad_down_held = true; next_down_tick = now + REPEAT_DELAY;
                         } else if (btn == SDL_CONTROLLER_BUTTON_DPAD_LEFT) {
@@ -3277,7 +3300,13 @@ int main(int argc, char *argv[]) {
                     menu_selection = (menu_selection - 1 + TOPMENU_MAX) % TOPMENU_MAX;
                 }
             }
-            else if (current_mode == MODE_SETTINGS)     { int _n; tab_defs(&_n); settings_index = (settings_index - 1 + _n) % _n; }
+            else if (current_mode == MODE_SETTINGS) {
+                int _n; tab_defs(&_n);
+                settings_index = (settings_index - 1 + _n) % _n;
+                if (settings_tab == 0 && cfg.single_pane &&
+                    general_defs[settings_index].bool_ptr == &cfg.paste_to_opposite)
+                    settings_index = (settings_index - 1 + _n) % _n;
+            }
             else if (current_mode == MODE_OSK && osk.kb_visible) { osk_move(-1, 0); }
             else if (current_mode == MODE_VIEW_TEXT)    { viewer_handle_button(SDL_CONTROLLER_BUTTON_DPAD_UP,   NULL, NULL, NULL, NULL, now); }
             else if (current_mode == MODE_VIEW_HEX)     { hexview_handle_button(SDL_CONTROLLER_BUTTON_DPAD_UP,  NULL, NULL, NULL, NULL, now); }
@@ -3296,7 +3325,13 @@ int main(int argc, char *argv[]) {
                     menu_selection = (menu_selection + 1) % TOPMENU_MAX;
                 }
             }
-            else if (current_mode == MODE_SETTINGS)     { int _n; tab_defs(&_n); settings_index = (settings_index + 1) % _n; }
+            else if (current_mode == MODE_SETTINGS) {
+                int _n; tab_defs(&_n);
+                settings_index = (settings_index + 1) % _n;
+                if (settings_tab == 0 && cfg.single_pane &&
+                    general_defs[settings_index].bool_ptr == &cfg.paste_to_opposite)
+                    settings_index = (settings_index + 1) % _n;
+            }
             else if (current_mode == MODE_OSK && osk.kb_visible) { osk_move(+1, 0); }
             else if (current_mode == MODE_VIEW_TEXT)    { viewer_handle_button(SDL_CONTROLLER_BUTTON_DPAD_DOWN,  NULL, NULL, NULL, NULL, now); }
             else if (current_mode == MODE_VIEW_HEX)     { hexview_handle_button(SDL_CONTROLLER_BUTTON_DPAD_DOWN, NULL, NULL, NULL, NULL, now); }
