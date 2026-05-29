@@ -92,8 +92,7 @@ static void hs_load(void) {
     if (!f) return;
     char name[8]; int score;
     while (hs_count < SNAKE_HS_MAX && fscanf(f, "%7s %d\n", name, &score) == 2) {
-        strncpy(high_scores[hs_count].name, name, 3);
-        high_scores[hs_count].name[3] = '\0';
+        copy_str(high_scores[hs_count].name, name, sizeof(high_scores[hs_count].name));
         high_scores[hs_count].score   = score;
         hs_count++;
     }
@@ -121,8 +120,7 @@ static int hs_qualifies(int score) {
 static void hs_insert(int rank, const char *name, int score) {
     int end = hs_count < SNAKE_HS_MAX ? hs_count : SNAKE_HS_MAX - 1;
     for (int i = end; i > rank; i--) high_scores[i] = high_scores[i - 1];
-    strncpy(high_scores[rank].name, name, 3);
-    high_scores[rank].name[3] = '\0';
+    copy_str(high_scores[rank].name, name, sizeof(high_scores[rank].name));
     high_scores[rank].score = score;
     if (hs_count < SNAKE_HS_MAX) hs_count++;
 }

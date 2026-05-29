@@ -4,6 +4,7 @@
 #include <string.h>
 #include <ctype.h>
 #include <unistd.h>
+#include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/vfs.h>
 #include <sys/statvfs.h>
@@ -18,7 +19,7 @@
 // ---------------------------------------------------------------------------
 // Version
 // ---------------------------------------------------------------------------
-#define VTREE_VERSION "1.4.1"
+#define VTREE_VERSION "1.4.3"
 
 // ---------------------------------------------------------------------------
 // Globals
@@ -138,7 +139,7 @@ static void init_exe_dir(void) {
     if (len > 0) {
         buf[len] = '\0';
         char *sl = strrchr(buf, '/');
-        if (sl) { *sl = '\0'; strncpy(vtree_exe_dir, buf, MAX_PATH - 1); return; }
+        if (sl) { *sl = '\0'; copy_str(vtree_exe_dir, buf, sizeof(vtree_exe_dir)); return; }
     }
     strncpy(vtree_exe_dir, ".", MAX_PATH - 1);
 }
@@ -195,7 +196,7 @@ static void scan_fonts(void) {
 
     // Keep the resolved full path in sync for hexview auto-sizer
     if (font_file_count > 0)
-        strncpy(vtree_font_path, font_files[current_font_idx], MAX_PATH - 1);
+        copy_str(vtree_font_path, font_files[current_font_idx], sizeof(vtree_font_path));
 }
 
 
@@ -831,8 +832,7 @@ static void settings_adjust(int dir) {
             load_dir(0, panes[0].current_path);
             load_dir(1, panes[1].current_path);
         } else if (d->bool_ptr == &cfg.exec_scripts && cfg.exec_scripts) {
-            strncpy(settings_toast_msg, tr("Settings_ExecWarning"),
-                    sizeof(settings_toast_msg) - 1);
+            copy_str(settings_toast_msg, tr("Settings_ExecWarning"), sizeof(settings_toast_msg));
             settings_save_toast = SDL_GetTicks() + 3500;
             settings_toast_tw   = 0;
             if (font_menu) TTF_SizeText(font_menu, settings_toast_msg, &settings_toast_tw, NULL);
@@ -846,7 +846,7 @@ static void settings_adjust(int dir) {
     } else if (d->type == STYPE_LANG) {
         if (lang_file_count < 1) return;
         current_lang_idx = (current_lang_idx + dir + lang_file_count) % lang_file_count;
-        strncpy(cfg.language_name, lang_names[current_lang_idx], sizeof(cfg.language_name) - 1);
+        copy_str(cfg.language_name, lang_names[current_lang_idx], sizeof(cfg.language_name));
         lang_reload();
         destroy_glyph_cache();
         settings_dirty = true;
@@ -867,8 +867,8 @@ static void settings_adjust(int dir) {
         const char *bn = strrchr(font_files[current_font_idx], '/');
         bn = bn ? bn + 1 : font_files[current_font_idx];
         vtree_log("Font file: %s -> %s\n", cfg.font_path, bn);
-        strncpy(cfg.font_path, bn, MAX_PATH - 1);
-        strncpy(vtree_font_path, font_files[current_font_idx], MAX_PATH - 1);
+        copy_str(cfg.font_path, bn, sizeof(cfg.font_path));
+        copy_str(vtree_font_path, font_files[current_font_idx], sizeof(vtree_font_path));
         reload_fonts();
         settings_dirty = true;
     }
@@ -881,7 +881,7 @@ static void settings_do_close() {
         current_font_idx    = snapshot_font_idx;
         current_lang_idx    = snapshot_lang_idx;
         if (font_file_count > 0 && current_font_idx < font_file_count)
-            strncpy(vtree_font_path, font_files[current_font_idx], MAX_PATH - 1);
+            copy_str(vtree_font_path, font_files[current_font_idx], sizeof(vtree_font_path));
         lang_reload();
         destroy_glyph_cache();
     }
@@ -918,7 +918,7 @@ static void settings_confirm() {
     if (d->type == STYPE_ACTION) {
         if (settings_index == n - 2) {  // Save Config
             if (!pending_keys_valid()) {
-                strncpy(settings_toast_msg, tr("Settings_UnsetKey"), sizeof(settings_toast_msg) - 1);
+                copy_str(settings_toast_msg, tr("Settings_UnsetKey"), sizeof(settings_toast_msg));
                 settings_save_toast = SDL_GetTicks() + 1800;
                 settings_toast_tw   = 0;
                 if (font_menu) TTF_SizeText(font_menu, settings_toast_msg, &settings_toast_tw, NULL);
@@ -933,7 +933,7 @@ static void settings_confirm() {
             settings_dirty      = false;
             settings_save_toast = SDL_GetTicks() + 1800;
             settings_toast_tw   = 0;
-            strncpy(settings_toast_msg, tr("Settings_Saved"), sizeof(settings_toast_msg) - 1);
+            copy_str(settings_toast_msg, tr("Settings_Saved"), sizeof(settings_toast_msg));
             if (font_menu) TTF_SizeText(font_menu, settings_toast_msg, &settings_toast_tw, NULL);
         } else if (settings_index == n - 1) {  // Close
             if (settings_dirty) { settings_save_prompt = true; save_prompt_sel = 0; }
@@ -1172,8 +1172,9 @@ static void draw_open_chooser() {
     int isz = 32;
     int spc = (cfg.font_size_menu + 14 > isz + 8) ? cfg.font_size_menu + 14 : isz + 8;
     int hh  = cfg.font_size_footer + 14;
+    int fh  = cfg.font_size_footer + 8;
     int mw  = cfg.screen_w - 80;
-    int mh  = hh + choose_count * spc + 8;
+    int mh  = hh + choose_count * spc + 6 + fh + 8;
     int mx  = (cfg.screen_w - mw) / 2;
     int my  = (cfg.screen_h - mh) / 2;
 
@@ -1222,6 +1223,11 @@ static void draw_open_chooser() {
             snprintf(lbl, sizeof(lbl), "%s", act_lbl);
         draw_txt_clipped(font_menu, lbl, mx + isz + 20, iy + (spc - cfg.font_size_menu) / 2, mw - isz - 36, lc);
     }
+    char hint[160];
+    snprintf(hint, sizeof(hint), tr("Hint_OpenChooser"), btn_label(cfg.k_confirm), btn_label(cfg.k_back));
+    draw_txt_clipped(font_footer, hint, mx + 12,
+                     my + hh + choose_count * spc + 6 + (fh - cfg.font_size_footer) / 2,
+                     mw - 24, cfg.theme.text_disabled);
     SDL_RenderSetClipRect(renderer, NULL);
 }
 
@@ -1297,12 +1303,62 @@ static void populate_diskinfo(void) {
         snprintf(diskinfo_lines[diskinfo_line_count++], 128, "%s", tr("DiskInfo_NoPartitions"));
 }
 
+// ---------------------------------------------------------------------------
+// In-process directory-size walk — replaces the old "du -d 1 | sort" popen,
+// which interpolated on-disk directory names straight into a shell command
+// (a command-injection vector: a dir named `$(reboot)` would have executed).
+// Sums actual disk usage (st_blocks * 512, matching du), stays on a single
+// filesystem (du -x semantics), and never follows symlinks. Traversal uses
+// openat/fstatat against directory fds so the kernel never re-resolves a full
+// path per entry — the cheapest walk on slow handheld IO. diskinfo_scan_abort
+// is polled in every readdir loop so cancellation stays instant.
+// ---------------------------------------------------------------------------
+
+// Recursively total disk usage of an already-open directory fd, INCLUDING the
+// directory inode's own blocks. Takes ownership of dfd (always closes it).
+// dev pins the walk to one filesystem.
+static long long diskinfo_dir_blocks(int dfd, dev_t dev) {
+    struct stat ds;
+    long long total = 0;
+    if (fstat(dfd, &ds) == 0) total += (long long)ds.st_blocks * 512;
+
+    DIR *d = fdopendir(dfd);          // takes ownership of dfd
+    if (!d) { close(dfd); return total; }
+
+    int fd = dirfd(d);
+    struct dirent *e;
+    while (!diskinfo_scan_abort && (e = readdir(d))) {
+        const char *n = e->d_name;
+        if (n[0] == '.' && (n[1] == '\0' || (n[1] == '.' && n[2] == '\0'))) continue;
+
+        struct stat st;
+        if (fstatat(fd, n, &st, AT_SYMLINK_NOFOLLOW) != 0) continue;
+        if (st.st_dev != dev) continue;            // du -x: don't cross mounts
+
+        if (S_ISDIR(st.st_mode)) {
+            int sub = openat(fd, n, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+            if (sub >= 0) total += diskinfo_dir_blocks(sub, dev);   // recurses, closes sub
+            else          total += (long long)st.st_blocks * 512;   // unreadable: count inode
+        } else {
+            total += (long long)st.st_blocks * 512;                 // file/symlink/etc.
+        }
+    }
+    closedir(d);                       // closes the underlying fd
+    return total;
+}
+
+// Immediate-child directories, sorted biggest-first for the drill display.
+#define DISKINFO_MAX_CHILDREN 1024
+typedef struct { char path[256]; long long bytes; } DiskinfoChild;
+
+static int diskinfo_child_cmp(const void *a, const void *b) {
+    long long da = ((const DiskinfoChild *)a)->bytes;
+    long long db = ((const DiskinfoChild *)b)->bytes;
+    return (db > da) - (db < da);      // descending by size
+}
+
 static void *diskinfo_scan_fn(void *arg) {
     (void)arg;
-    char cmd[512];
-    snprintf(cmd, sizeof(cmd), "du -d 1 \"%s\" 2>/dev/null | sort -rn",
-             diskinfo_scan_for_path);
-    FILE *fp = popen(cmd, "r");
 
     int  lc = 0, dc = 0;
     char sl[DISKINFO_MAX_LINES][128];
@@ -1310,31 +1366,78 @@ static void *diskinfo_scan_fn(void *arg) {
     char sdp[48][256];
     for (int i = 0; i < DISKINFO_MAX_LINES; i++) sb[i] = -1;
 
-    if (!fp) {
+    DiskinfoChild *kids = malloc(sizeof(DiskinfoChild) * DISKINFO_MAX_CHILDREN);
+    int       nkids        = 0;
+    long long parent_bytes = 0;
+
+    int tfd = open(diskinfo_scan_for_path,
+                   O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+    struct stat ts;
+    if (!kids || tfd < 0 || fstat(tfd, &ts) != 0) {
+        if (tfd >= 0) close(tfd);
         snprintf(sl[lc++], 128, "  (scan failed)");
     } else {
-        char line[512];
-        long long parent_kb = -1;
-        while (!diskinfo_scan_abort &&
-               fgets(line, sizeof(line), fp) &&
-               lc + 2 < DISKINFO_MAX_LINES && dc < 48) {
-            long long kb; char entry[256];
-            if (sscanf(line, "%lld %255[^\n]", &kb, entry) != 2) continue;
-            if (parent_kb < 0) { parent_kb = kb; continue; }
-            const char *dname = strrchr(entry, '/');
-            dname = dname ? dname + 1 : entry;
-            char sizestr[16];
-            format_size(kb * 1024, sizestr);
-            snprintf(sl[lc++], 128, "  %-26s %s", dname, sizestr);
-            int pct = (parent_kb > 0) ? (int)(kb * 100 / parent_kb) : 0;
-            sb[lc] = pct;
-            sl[lc++][0] = '\0';
-            strncpy(sdp[dc++], entry, 255);
+        dev_t dev    = ts.st_dev;
+        parent_bytes = (long long)ts.st_blocks * 512;   // the scanned dir's own inode
+
+        DIR *d = fdopendir(tfd);          // takes ownership of tfd
+        if (!d) {
+            close(tfd);
+            snprintf(sl[lc++], 128, "  (scan failed)");
+        } else {
+            int fd = dirfd(d);
+            struct dirent *e;
+            while (!diskinfo_scan_abort && (e = readdir(d))) {
+                const char *n = e->d_name;
+                if (n[0] == '.' && (n[1] == '\0' || (n[1] == '.' && n[2] == '\0'))) continue;
+
+                struct stat st;
+                if (fstatat(fd, n, &st, AT_SYMLINK_NOFOLLOW) != 0) continue;
+                if (st.st_dev != dev) continue;           // du -x
+
+                if (S_ISDIR(st.st_mode)) {
+                    long long ct;
+                    int sub = openat(fd, n, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+                    if (sub >= 0) ct = diskinfo_dir_blocks(sub, dev);
+                    else          ct = (long long)st.st_blocks * 512;
+                    parent_bytes += ct;
+                    if (nkids < DISKINFO_MAX_CHILDREN) {
+                        // Full child path — join_path semantics, bounded to 256
+                        if (strcmp(diskinfo_scan_for_path, "/") == 0)
+                            snprintf(kids[nkids].path, sizeof(kids[nkids].path), "/%s", n);
+                        else
+                            snprintf(kids[nkids].path, sizeof(kids[nkids].path), "%s/%s",
+                                     diskinfo_scan_for_path, n);
+                        kids[nkids].bytes = ct;
+                        nkids++;
+                    }
+                } else {
+                    parent_bytes += (long long)st.st_blocks * 512;   // loose file
+                }
+            }
+            closedir(d);
+
+            if (!diskinfo_scan_abort) {
+                qsort(kids, nkids, sizeof(DiskinfoChild), diskinfo_child_cmp);
+                for (int i = 0; i < nkids && lc + 2 < DISKINFO_MAX_LINES && dc < 48; i++) {
+                    const char *dname = strrchr(kids[i].path, '/');
+                    dname = dname ? dname + 1 : kids[i].path;
+                    char sizestr[16];
+                    format_size(kids[i].bytes, sizestr);
+                    snprintf(sl[lc++], 128, "  %-26s %s", dname, sizestr);
+                    int pct = (parent_bytes > 0) ? (int)(kids[i].bytes * 100 / parent_bytes) : 0;
+                    sb[lc] = pct;
+                    sl[lc++][0] = '\0';
+                    copy_str(sdp[dc], kids[i].path, sizeof(sdp[dc]));
+                    dc++;
+                }
+                if (lc == 0)
+                    snprintf(sl[lc++], 128, "  (no subdirectories)");
+            }
         }
-        pclose(fp);
-        if (lc == 0 && !diskinfo_scan_abort)
-            snprintf(sl[lc++], 128, "  (no subdirectories)");
     }
+
+    free(kids);
 
     if (!diskinfo_scan_abort) {
         memcpy(diskinfo_scan_lines,     sl,  sizeof(sl));
@@ -1376,7 +1479,7 @@ static void diskinfo_cache_store(const char *path) {
         slot = diskinfo_cache_next;
         diskinfo_cache_next = (diskinfo_cache_next + 1) % DISKINFO_CACHE_MAX;
     }
-    strncpy(diskinfo_cache[slot].path, path, 255);
+    copy_str(diskinfo_cache[slot].path, path, sizeof(diskinfo_cache[slot].path));
     memcpy(diskinfo_cache[slot].lines,     diskinfo_lines,    sizeof(diskinfo_lines));
     memcpy(diskinfo_cache[slot].bar_pct,   diskinfo_bar_pct,  sizeof(diskinfo_bar_pct));
     diskinfo_cache[slot].line_count = diskinfo_line_count;
@@ -1406,7 +1509,7 @@ static void populate_diskinfo_drill(const char *path) {
 
     if (diskinfo_cache_restore(path)) return;  // instant if cached
 
-    strncpy(diskinfo_scan_for_path, path, 255);
+    copy_str(diskinfo_scan_for_path, path, sizeof(diskinfo_scan_for_path));
     diskinfo_scan_ready = false;
     diskinfo_scan_abort = false;
     diskinfo_scanning   = true;
@@ -1511,8 +1614,8 @@ static void draw_about_modal() {
     int txt_block_h = cfg.font_size_header + 4 + cfg.font_size_footer;
     int txt_x       = row_x + logo_w;
     int txt_y       = row_y + (64 - txt_block_h) / 2;
-    draw_txt(font_header, tr("AppTitle"),      txt_x, txt_y,                                  cfg.theme.text);
-    draw_txt(font_footer, "v" VTREE_VERSION,   txt_x, txt_y + cfg.font_size_header + 4,       cfg.theme.link);
+    draw_txt_clipped(font_header, tr("AppTitle"),    txt_x, txt_y,                            text_col_w, cfg.theme.marked);
+    draw_txt_clipped(font_footer, "v" VTREE_VERSION, txt_x, txt_y + cfg.font_size_header + 4, text_col_w, cfg.theme.link);
 
     int ty = my + hh + 14;
     draw_txt_clipped(font_menu, tr("About_Subtitle"), mx + 18, ty, mw - 36, cfg.theme.text);
@@ -1842,8 +1945,8 @@ static void vtree_exec_script(const char *path) {
        muOS tracks the original process — staying alive keeps the session
        slot open so the frontend doesn't reload over the launched app. */
     if (cfg.remember_dirs) {
-        strncpy(cfg.start_left,  panes[0].current_path, MAX_PATH - 1);
-        strncpy(cfg.start_right, panes[1].current_path, MAX_PATH - 1);
+        copy_str(cfg.start_left,  panes[0].current_path, sizeof(cfg.start_left));
+        copy_str(cfg.start_right, panes[1].current_path, sizeof(cfg.start_right));
         save_config();
     }
     if (debug_log_file) { fclose(debug_log_file); debug_log_file = NULL; }
@@ -1865,7 +1968,7 @@ static void vtree_exec_script(const char *path) {
 // Helper: open a file — auto-route images; show chooser for everything else
 // ---------------------------------------------------------------------------
 static void open_file(const char *path, const char *name) {
-    strncpy(choose_path, path, MAX_PATH - 1);
+    copy_str(choose_path, path, sizeof(choose_path));
     choose_count = 0;
     struct stat _st; bool is_dir = (stat(path, &_st) == 0 && S_ISDIR(_st.st_mode));
     choose_path_is_dir = is_dir;
@@ -1969,9 +2072,9 @@ static void *paste_thread_fn(void *arg) {
         }
 
         // Set top-level item name as initial display; copy_path_r will refine it per-file
-        strncpy(paste_prog_name, clip.names[i], MAX_PATH - 1);
+        copy_str(paste_prog_name, clip.names[i], sizeof(paste_prog_name));
         paste_prog_name[MAX_PATH - 1] = '\0';
-        strncpy(paste_copy_root, clip.src_paths[i], MAX_PATH - 1);
+        copy_str(paste_copy_root, clip.src_paths[i], sizeof(paste_copy_root));
         paste_copy_root[MAX_PATH - 1] = '\0';
 
         bool conflict = (access(d, F_OK) == 0);
@@ -2032,8 +2135,9 @@ static void do_paste(PasteConflict res, int pane_idx) {
 static void draw_paste_dest(void) {
     int hh  = cfg.font_size_footer + 14;
     int spc = cfg.font_size_menu   + 14;
+    int fh  = cfg.font_size_footer + 8;
     int mw  = cfg.screen_w - 80;
-    int mh  = hh + 2 * spc + 8;
+    int mh  = hh + 2 * spc + 6 + fh + 8;
     int mx  = (cfg.screen_w - mw) / 2;
     int my  = (cfg.screen_h - mh) / 2;
 
@@ -2069,14 +2173,20 @@ static void draw_paste_dest(void) {
         snprintf(line, sizeof(line), "%-10s  %s", dest_labels[i], panes[pane_i].current_path);
         draw_txt_clipped(font_menu, line, mx + 16, iy + (spc - cfg.font_size_menu) / 2, mw - 32, lc);
     }
+    char hint[160];
+    snprintf(hint, sizeof(hint), tr("Hint_PasteDest"), btn_label(cfg.k_confirm), btn_label(cfg.k_back));
+    draw_txt_clipped(font_footer, hint, mx + 12,
+                     my + hh + 2 * spc + 6 + (fh - cfg.font_size_footer) / 2,
+                     mw - 24, cfg.theme.text_disabled);
     SDL_RenderSetClipRect(renderer, NULL);
 }
 
 static void draw_paste_conflict(void) {
     int hh  = cfg.font_size_footer + 14;
     int spc = cfg.font_size_menu   + 14;
+    int fh  = cfg.font_size_footer + 8;
     int mw  = cfg.screen_w - 80;
-    int mh  = hh + PC_MAX * spc + 8;
+    int mh  = hh + PC_MAX * spc + 6 + fh + 8;
     int mx  = (cfg.screen_w - mw) / 2;
     int my  = (cfg.screen_h - mh) / 2;
 
@@ -2111,6 +2221,11 @@ static void draw_paste_conflict(void) {
         if (i == PC_CANCEL && i != paste_conflict_sel) lc = cfg.theme.text_disabled;
         draw_txt_clipped(font_menu, tr(pc_labels[i]), mx + 16, iy + (spc - cfg.font_size_menu) / 2, mw - 32, lc);
     }
+    char hint[160];
+    snprintf(hint, sizeof(hint), tr("Hint_PasteConflict"), btn_label(cfg.k_confirm), btn_label(cfg.k_back));
+    draw_txt_clipped(font_footer, hint, mx + 12,
+                     my + hh + PC_MAX * spc + 6 + (fh - cfg.font_size_footer) / 2,
+                     mw - 24, cfg.theme.text_disabled);
     SDL_RenderSetClipRect(renderer, NULL);
 }
 
@@ -2513,8 +2628,8 @@ int main(int argc, char *argv[]) {
         while (SDL_PollEvent(&ev)) {
             if (ev.type == SDL_QUIT) {
                 if (cfg.remember_dirs) {
-                    strncpy(cfg.start_left,  panes[0].current_path, MAX_PATH - 1);
-                    strncpy(cfg.start_right, panes[1].current_path, MAX_PATH - 1);
+                    copy_str(cfg.start_left,  panes[0].current_path, sizeof(cfg.start_left));
+                    copy_str(cfg.start_right, panes[1].current_path, sizeof(cfg.start_right));
                     save_config();
                 }
                 running = false;
@@ -2645,7 +2760,7 @@ int main(int argc, char *argv[]) {
                             if (strcmp(fe->name, "..") == 0) {
                                 char entered_dir[256] = "";
                                 char *last = strrchr(s->current_path, '/');
-                                if (last) strncpy(entered_dir, last + 1, sizeof(entered_dir) - 1);
+                                if (last) copy_str(entered_dir, last + 1, sizeof(entered_dir));
                                 if (last == s->current_path) strcpy(next, "/");
                                 else { *last = '\0'; strcpy(next, s->current_path); }
                                 load_dir(active_pane, next);
@@ -2677,7 +2792,7 @@ int main(int argc, char *argv[]) {
                             char next[MAX_PATH];
                             char entered_dir[256] = "";
                             char *last = strrchr(s->current_path, '/');
-                            if (last) strncpy(entered_dir, last + 1, sizeof(entered_dir) - 1);
+                            if (last) copy_str(entered_dir, last + 1, sizeof(entered_dir));
                             if (last == s->current_path) strcpy(next, "/");
                             else { *last = '\0'; strcpy(next, s->current_path); }
                             load_dir(active_pane, next);
@@ -2692,13 +2807,17 @@ int main(int argc, char *argv[]) {
                         if (btn == cfg.k_back || btn == cfg.k_menu) {
                             paste_dest_active     = false;
                             do_symlink_after_dest = false;
+                            ui_sound_back();
                         } else if (btn == SDL_CONTROLLER_BUTTON_DPAD_UP || btn == SDL_CONTROLLER_BUTTON_DPAD_LEFT) {
                             paste_dest_sel = 0;
+                            ui_sound_navigate();
                         } else if (btn == SDL_CONTROLLER_BUTTON_DPAD_DOWN || btn == SDL_CONTROLLER_BUTTON_DPAD_RIGHT) {
                             paste_dest_sel = 1;
+                            ui_sound_navigate();
                         } else if (btn == cfg.k_confirm) {
                             paste_dest_pane   = paste_dest_sel;  // 0 = left, 1 = right
                             paste_dest_active = false;
+                            ui_sound_confirm();
                             if (do_symlink_after_dest) {
                                 do_symlink(paste_dest_pane);
                             } else {
@@ -2715,11 +2834,15 @@ int main(int argc, char *argv[]) {
                     } else if (paste_conflict_active) {
                         if (btn == cfg.k_back || btn == cfg.k_menu) {
                             paste_conflict_active = false;
+                            ui_sound_back();
                         } else if (btn == SDL_CONTROLLER_BUTTON_DPAD_UP) {
                             paste_conflict_sel = (paste_conflict_sel - 1 + PC_MAX) % PC_MAX;
+                            ui_sound_navigate();
                         } else if (btn == SDL_CONTROLLER_BUTTON_DPAD_DOWN) {
                             paste_conflict_sel = (paste_conflict_sel + 1) % PC_MAX;
+                            ui_sound_navigate();
                         } else if (btn == cfg.k_confirm) {
+                            ui_sound_confirm();
                             do_paste((PasteConflict)paste_conflict_sel, paste_dest_pane);
                         }
                     // ── About modal ───────────────────────────────────────────
@@ -2788,23 +2911,23 @@ int main(int argc, char *argv[]) {
                             if (diskinfo_mode == 0 && diskinfo_part_count > 0) {
                                 // Extract mount path from header line: "PATH  [fstype]"
                                 char mount[256];
-                                strncpy(mount, diskinfo_lines[diskinfo_part_lines[diskinfo_sel_part]], 255);
+                                copy_str(mount, diskinfo_lines[diskinfo_part_lines[diskinfo_sel_part]], sizeof(mount));
                                 char *sp = strchr(mount, ' ');
                                 if (sp) *sp = '\0';
-                                strncpy(diskinfo_drillpath, mount, 255);
+                                copy_str(diskinfo_drillpath, mount, sizeof(diskinfo_drillpath));
                                 diskinfo_mode  = 1;
                                 diskinfo_depth = 0;
                                 populate_diskinfo_drill(diskinfo_drillpath);
                             } else if (diskinfo_mode == 1 && diskinfo_sel_dir < diskinfo_dir_count) {
                                 // Drill into selected subdirectory — save position first
                                 if (diskinfo_depth < DISKINFO_DEPTH_MAX) {
-                                    strncpy(diskinfo_pathstack[diskinfo_depth], diskinfo_drillpath, 255);
+                                    copy_str(diskinfo_pathstack[diskinfo_depth], diskinfo_drillpath, sizeof(diskinfo_pathstack[diskinfo_depth]));
                                     diskinfo_selstack[diskinfo_depth]    = diskinfo_sel_dir;
                                     diskinfo_scrollstack[diskinfo_depth] = diskinfo_scroll;
                                     diskinfo_depth++;
                                 }
-                                strncpy(diskinfo_drillpath,
-                                        diskinfo_dir_paths[diskinfo_sel_dir], 255);
+                                copy_str(diskinfo_drillpath,
+                                         diskinfo_dir_paths[diskinfo_sel_dir], sizeof(diskinfo_drillpath));
                                 populate_diskinfo_drill(diskinfo_drillpath);
                             }
                         } else if (btn == cfg.k_back) {
@@ -2815,8 +2938,8 @@ int main(int argc, char *argv[]) {
                             } else if (diskinfo_depth > 0) {
                                 // Go up one directory level — restore saved position
                                 diskinfo_depth--;
-                                strncpy(diskinfo_drillpath,
-                                        diskinfo_pathstack[diskinfo_depth], 255);
+                                copy_str(diskinfo_drillpath,
+                                         diskinfo_pathstack[diskinfo_depth], sizeof(diskinfo_drillpath));
                                 populate_diskinfo_drill(diskinfo_drillpath);
                                 diskinfo_sel_dir = diskinfo_selstack[diskinfo_depth];
                                 diskinfo_scroll  = diskinfo_scrollstack[diskinfo_depth];
@@ -2877,7 +3000,7 @@ int main(int argc, char *argv[]) {
                                 if (clip.op != OP_NONE) {
                                     if (clip.op == req_op) {
                                         clip.op = OP_NONE; clip.count = 0;
-                                        strncpy(explorer_toast_msg, tr("Clipboard_Cleared"), sizeof(explorer_toast_msg) - 1);
+                                        copy_str(explorer_toast_msg, tr("Clipboard_Cleared"), sizeof(explorer_toast_msg));
                                         explorer_toast_until = SDL_GetTicks() + 1600;
                                         explorer_toast_tw    = 0;
                                         if (font_menu) TTF_SizeText(font_menu, explorer_toast_msg, &explorer_toast_tw, NULL);
@@ -2936,9 +3059,8 @@ int main(int argc, char *argv[]) {
                                 if (!p0_ok && !p1_ok) {
                                     // Neither pane supports symlinks — error immediately
                                     current_mode = MODE_EXPLORER;
-                                    snprintf(exec_error_title, sizeof(exec_error_title), "Cannot Create Symlink");
-                                    snprintf(exec_error_msg, sizeof(exec_error_msg),
-                                             "Destination filesystem does not support symlinks");
+                                    snprintf(exec_error_title, sizeof(exec_error_title), "%s", tr("Symlink_ErrorTitle"));
+                                    snprintf(exec_error_msg, sizeof(exec_error_msg), "%s", tr("Symlink_ErrorMsg"));
                                     exec_error_active = true;
                                 } else {
                                     do_symlink_after_dest = true;
@@ -3021,8 +3143,8 @@ int main(int argc, char *argv[]) {
                                 diskinfo_active = true;
                             } else if (sel == TOPMENU_EXIT) {
                                 if (cfg.remember_dirs) {
-                                    strncpy(cfg.start_left,  panes[0].current_path, MAX_PATH - 1);
-                                    strncpy(cfg.start_right, panes[1].current_path, MAX_PATH - 1);
+                                    copy_str(cfg.start_left,  panes[0].current_path, sizeof(cfg.start_left));
+                                    copy_str(cfg.start_right, panes[1].current_path, sizeof(cfg.start_right));
                                     save_config();
                                 }
                                 running = false;
@@ -3042,7 +3164,7 @@ int main(int argc, char *argv[]) {
                         } else if (btn == cfg.k_confirm) {
                             if (save_prompt_sel == 0 && !pending_keys_valid()) {
                                 settings_save_prompt = false;
-                                strncpy(settings_toast_msg, tr("Settings_UnsetKey"), sizeof(settings_toast_msg) - 1);
+                                copy_str(settings_toast_msg, tr("Settings_UnsetKey"), sizeof(settings_toast_msg));
                                 settings_save_toast = SDL_GetTicks() + 1800;
                                 settings_toast_tw   = 0;
                                 if (font_menu) TTF_SizeText(font_menu, settings_toast_msg, &settings_toast_tw, NULL);
@@ -3071,7 +3193,7 @@ int main(int argc, char *argv[]) {
                             }
                         }
                         if (conflict) {
-                            strncpy(settings_toast_msg, tr("Settings_AlreadyBound"), sizeof(settings_toast_msg) - 1);
+                            copy_str(settings_toast_msg, tr("Settings_AlreadyBound"), sizeof(settings_toast_msg));
                             settings_save_toast = SDL_GetTicks() + 1800;
                             settings_toast_tw   = 0;
                             if (font_menu) TTF_SizeText(font_menu, settings_toast_msg, &settings_toast_tw, NULL);
@@ -3200,11 +3322,15 @@ int main(int argc, char *argv[]) {
                 } else if (current_mode == MODE_VIEW_CHOOSE) {
                     if (btn == cfg.k_back || btn == cfg.k_menu) {
                         current_mode = MODE_EXPLORER;
+                        ui_sound_back();
                     } else if (btn == SDL_CONTROLLER_BUTTON_DPAD_UP) {
                         choose_selection = (choose_selection - 1 + choose_count) % choose_count;
+                        ui_sound_navigate();
                     } else if (btn == SDL_CONTROLLER_BUTTON_DPAD_DOWN) {
                         choose_selection = (choose_selection + 1) % choose_count;
+                        ui_sound_navigate();
                     } else if (btn == cfg.k_confirm) {
+                        ui_sound_confirm();
                         int act = choose_actions[choose_selection];
                         if      (act == ACT_CANCEL) { current_mode = MODE_EXPLORER; }
                         else if (act == ACT_TEXT)   { viewer_open(choose_path); }

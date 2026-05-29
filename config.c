@@ -187,8 +187,7 @@ static void load_themes_from_file(FILE *f) {
                 if (dup) { cur = -1; continue; }
 
                 cur = named_theme_count++;
-                strncpy(named_themes[cur].name, tname, MAX_THEME_NAME - 1);
-                named_themes[cur].name[MAX_THEME_NAME - 1] = '\0';
+                copy_str(named_themes[cur].name, tname, sizeof(named_themes[cur].name));
                 // Initialise with dark fallback so partial definitions still work
                 named_themes[cur].colors = dark_fallback;
             } else {
@@ -376,7 +375,7 @@ void load_config() {
         else if (strcmp(k, "FontSizeFooter")   == 0) cfg.font_size_footer = atoi(v);
         else if (strcmp(k, "FontSizeMenu")     == 0) cfg.font_size_menu   = atoi(v);
         else if (strcmp(k, "FontSizeHex")      == 0) cfg.font_size_hex    = atoi(v);
-        else if (strcmp(k, "FontFile")         == 0) strncpy(cfg.font_path, v, MAX_PATH - 1);
+        else if (strcmp(k, "FontFile")         == 0) copy_str(cfg.font_path, v, sizeof(cfg.font_path));
         // [General]
         else if (strcmp(k, "ShowHidden")   == 0) cfg.show_hidden   = (strcmp(v,"true")==0 || strcmp(v,"1")==0);
         else if (strcmp(k, "RememberDirs") == 0) cfg.remember_dirs = (strcmp(v,"true")==0 || strcmp(v,"1")==0);
@@ -387,11 +386,15 @@ void load_config() {
         else if (strcmp(k, "TintIcons")    == 0) cfg.tint_icons    = (strcmp(v,"true")==0 || strcmp(v,"1")==0);
         else if (strcmp(k, "UISounds")     == 0) cfg.ui_sounds     = (strcmp(v,"true")==0 || strcmp(v,"1")==0);
         else if (strcmp(k, "Rotation")     == 0) { int r = atoi(v); cfg.rotation = (r >= 0 && r <= 3) ? r : 0; }
-        else if (strcmp(k, "Language")     == 0) strncpy(cfg.language_name, v, sizeof(cfg.language_name) - 1);
+        else if (strcmp(k, "Language")     == 0) copy_str(cfg.language_name, v, sizeof(cfg.language_name));
         // [Paths]
-        else if (strcmp(k, "StartDirectoryLeft")  == 0) { if (!realpath(v, cfg.start_left))  strcpy(cfg.start_left,  v); }
-        else if (strcmp(k, "StartDirectoryRight") == 0) { if (!realpath(v, cfg.start_right)) strcpy(cfg.start_right, v); }
-        else if (strcmp(k, "GameControllerDB")    == 0) strncpy(cfg.gamecontrollerdb, v, MAX_PATH - 1);
+        // realpath() may write up to PATH_MAX (4096) bytes, which would overflow
+        // start_left/right (MAX_PATH = 1024). Resolve into a malloc'd buffer
+        // (realpath(...,NULL), POSIX.1-2008) and bounded-copy; fall back to the
+        // raw value if the path can't be resolved.
+        else if (strcmp(k, "StartDirectoryLeft")  == 0) { char *rp = realpath(v, NULL); copy_str(cfg.start_left,  rp ? rp : v, sizeof(cfg.start_left));  free(rp); }
+        else if (strcmp(k, "StartDirectoryRight") == 0) { char *rp = realpath(v, NULL); copy_str(cfg.start_right, rp ? rp : v, sizeof(cfg.start_right)); free(rp); }
+        else if (strcmp(k, "GameControllerDB")    == 0) copy_str(cfg.gamecontrollerdb, v, sizeof(cfg.gamecontrollerdb));
         // [Keys]
         else if (strcmp(k, "KeyConfirm") == 0) cfg.k_confirm = SDL_GameControllerGetButtonFromString(v);
         else if (strcmp(k, "KeyBack")    == 0) cfg.k_back    = SDL_GameControllerGetButtonFromString(v);
@@ -417,15 +420,15 @@ void load_config() {
         else if (strcmp(k, "KbdMenu2")    == 0) { SDL_Keycode kc = SDL_GetKeyFromName(v); if (kc != SDLK_UNKNOWN) cfg.kbd_k_menu2   = kc; }
         else if (strcmp(k, "KbdX")        == 0) { SDL_Keycode kc = SDL_GetKeyFromName(v); if (kc != SDLK_UNKNOWN) cfg.kbd_k_x       = kc; }
         else if (strcmp(k, "KbdStart")    == 0) { SDL_Keycode kc = SDL_GetKeyFromName(v); if (kc != SDLK_UNKNOWN) cfg.kbd_k_start   = kc; }
-        else if (strcmp(k, "KbdLabelConfirm") == 0) strncpy(cfg.kbd_label_confirm, v, sizeof(cfg.kbd_label_confirm) - 1);
-        else if (strcmp(k, "KbdLabelBack")    == 0) strncpy(cfg.kbd_label_back,    v, sizeof(cfg.kbd_label_back)    - 1);
-        else if (strcmp(k, "KbdLabelMenu")    == 0) strncpy(cfg.kbd_label_menu,    v, sizeof(cfg.kbd_label_menu)    - 1);
-        else if (strcmp(k, "KbdLabelMark")    == 0) strncpy(cfg.kbd_label_mark,    v, sizeof(cfg.kbd_label_mark)    - 1);
-        else if (strcmp(k, "KbdLabelPgUp")    == 0) strncpy(cfg.kbd_label_pgup,    v, sizeof(cfg.kbd_label_pgup)    - 1);
-        else if (strcmp(k, "KbdLabelPgDn")    == 0) strncpy(cfg.kbd_label_pgdn,    v, sizeof(cfg.kbd_label_pgdn)    - 1);
-        else if (strcmp(k, "KbdLabelMenu2")   == 0) strncpy(cfg.kbd_label_menu2,   v, sizeof(cfg.kbd_label_menu2)   - 1);
-        else if (strcmp(k, "KbdLabelX")       == 0) strncpy(cfg.kbd_label_x,       v, sizeof(cfg.kbd_label_x)       - 1);
-        else if (strcmp(k, "KbdLabelStart")   == 0) strncpy(cfg.kbd_label_start,   v, sizeof(cfg.kbd_label_start)   - 1);
+        else if (strcmp(k, "KbdLabelConfirm") == 0) copy_str(cfg.kbd_label_confirm, v, sizeof(cfg.kbd_label_confirm));
+        else if (strcmp(k, "KbdLabelBack")    == 0) copy_str(cfg.kbd_label_back,    v, sizeof(cfg.kbd_label_back));
+        else if (strcmp(k, "KbdLabelMenu")    == 0) copy_str(cfg.kbd_label_menu,    v, sizeof(cfg.kbd_label_menu));
+        else if (strcmp(k, "KbdLabelMark")    == 0) copy_str(cfg.kbd_label_mark,    v, sizeof(cfg.kbd_label_mark));
+        else if (strcmp(k, "KbdLabelPgUp")    == 0) copy_str(cfg.kbd_label_pgup,    v, sizeof(cfg.kbd_label_pgup));
+        else if (strcmp(k, "KbdLabelPgDn")    == 0) copy_str(cfg.kbd_label_pgdn,    v, sizeof(cfg.kbd_label_pgdn));
+        else if (strcmp(k, "KbdLabelMenu2")   == 0) copy_str(cfg.kbd_label_menu2,   v, sizeof(cfg.kbd_label_menu2));
+        else if (strcmp(k, "KbdLabelX")       == 0) copy_str(cfg.kbd_label_x,       v, sizeof(cfg.kbd_label_x));
+        else if (strcmp(k, "KbdLabelStart")   == 0) copy_str(cfg.kbd_label_start,   v, sizeof(cfg.kbd_label_start));
         // [ActiveTheme] — name of the theme to activate on startup
         else if (strcmp(k, "ActiveTheme") == 0) {
             for (int i = 0; i < named_theme_count; i++) {
@@ -452,9 +455,9 @@ void load_config() {
                     ext[ei++] = (char)tolower((unsigned char)*tok++);
                 ext[ei] = '\0';
                 if (is_img)
-                    strncpy(cfg.extra_image_exts[*cnt], ext, MAX_EXT_LEN - 1);
+                    copy_str(cfg.extra_image_exts[*cnt], ext, sizeof(cfg.extra_image_exts[*cnt]));
                 else
-                    strncpy(cfg.extra_text_exts[*cnt],  ext, MAX_EXT_LEN - 1);
+                    copy_str(cfg.extra_text_exts[*cnt],  ext, sizeof(cfg.extra_text_exts[*cnt]));
                 (*cnt)++;
                 tok = strtok(NULL, " ,\t");
             }
@@ -477,8 +480,12 @@ void load_config() {
 // ---------------------------------------------------------------------------
 void save_config() {
     char config_path[MAX_PATH];
+    char tmp_path[MAX_PATH];
     get_config_path(config_path);
-    FILE *f = fopen(config_path, "w");
+    // Atomic save: write to .tmp, then rename over the live config so a crash
+    // mid-write can never leave a truncated config.ini behind.
+    snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", config_path);
+    FILE *f = fopen(tmp_path, "w");
     if (!f) return;
 
     fprintf(f, "[General]\n");
@@ -576,5 +583,8 @@ void save_config() {
         fprintf(f, "%s%s", i ? " " : "", cfg.extra_text_exts[i]);
     fprintf(f, "\n");
 
-    fclose(f);
+    bool ok = (ferror(f) == 0);
+    if (fclose(f) != 0) ok = false;
+    if (!ok) { unlink(tmp_path); return; }
+    if (rename(tmp_path, config_path) != 0) unlink(tmp_path);
 }

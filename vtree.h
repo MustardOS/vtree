@@ -181,6 +181,7 @@ int   count_files(const char *path);
 char *trim(char *str);
 void  format_size(long long bytes, char *out);
 void  join_path(char *out, const char *dir, const char *name);
+void  copy_str(char *dst, const char *src, size_t dst_size);  // safe, always-terminating strncpy replacement
 
 // lang.c — i18n
 #include "lang.h"

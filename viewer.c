@@ -27,8 +27,9 @@
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
-#define TV_MAX_LINES   4096
+#define TV_MAX_LINES   8192
 #define TV_MAX_LINE_LEN 1024
+#define TV_MAX_BYTES   (2 * 1024 * 1024)   // 2 MB load cap; larger files load view-only
 
 // ---------------------------------------------------------------------------
 // State
@@ -42,6 +43,7 @@ typedef struct {
     int    x_off;         // horizontal pixel scroll offset (read mode only)
     bool   modified;
     bool   read_only;     // set if file couldn't be opened for writing
+    bool   truncated;     // file exceeded the byte/line cap — only a prefix is loaded (forces read_only)
 } TextViewState;
 
 static TextViewState tv;
@@ -120,7 +122,7 @@ static void tv_split_lines(const char *data, size_t len) {
             tv.lines[tv.line_count][llen] = '\0';
             tv.line_count++;
             lstart = i + 1;
-            if (tv.line_count >= TV_MAX_LINES) break;
+            if (tv.line_count >= TV_MAX_LINES) { if (i < (int)len) tv.truncated = true; break; }
         }
     }
     if (tv.line_count == 0) {
@@ -131,16 +133,40 @@ static void tv_split_lines(const char *data, size_t len) {
 
 // Rebuild raw text from lines and write to disk
 static bool tv_save(void) {
-    FILE *f = fopen(tv.path, "w");
+    // Atomic save: write to a temp file, fsync, then rename over the original so
+    // a crash or full disk mid-write can't leave a truncated/corrupt file. (A
+    // symlink path is replaced by a regular file — acceptable for this editor.)
+    char tmp[MAX_PATH];
+    if (snprintf(tmp, sizeof(tmp), "%s.vtree_tmp", tv.path) >= (int)sizeof(tmp)) {
+        vtree_log("[viewer] save FAILED: temp path too long: %s\n", tv.path);
+        return false;
+    }
+    struct stat ost;
+    bool have_mode = (stat(tv.path, &ost) == 0);
+
+    FILE *f = fopen(tmp, "w");
     if (!f) {
-        vtree_log("[viewer] save FAILED: %s (errno %d: %s)\n", tv.path, errno, strerror(errno));
+        vtree_log("[viewer] save FAILED: %s (errno %d: %s)\n", tmp, errno, strerror(errno));
         return false;
     }
     for (int i = 0; i < tv.line_count; i++) {
         fputs(tv.lines[i], f);
         if (i < tv.line_count - 1) fputc('\n', f);
     }
-    fclose(f);
+    bool ok = (fflush(f) == 0) && (ferror(f) == 0) && (fsync(fileno(f)) == 0);
+    if (fclose(f) != 0) ok = false;
+    if (!ok) {
+        vtree_log("[viewer] save FAILED (write): %s (errno %d: %s)\n", tmp, errno, strerror(errno));
+        unlink(tmp);
+        return false;
+    }
+    if (have_mode) chmod(tmp, ost.st_mode & 07777);   // preserve original permissions
+    if (rename(tmp, tv.path) != 0) {
+        vtree_log("[viewer] save FAILED (rename): %s -> %s (errno %d: %s)\n",
+                  tmp, tv.path, errno, strerror(errno));
+        unlink(tmp);
+        return false;
+    }
     vtree_log("[viewer] saved: %s  (%d lines)\n", tv.path, tv.line_count);
     return true;
 }
@@ -151,7 +177,7 @@ static bool tv_save(void) {
 
 void viewer_open(const char *path) {
     memset(&tv, 0, sizeof(tv));
-    strncpy(tv.path, path, MAX_PATH - 1);
+    copy_str(tv.path, path, sizeof(tv.path));
     tv.top_line   = 0;
     tv.cur_line   = 0;
     tv.modified   = false;
@@ -175,26 +201,31 @@ void viewer_open(const char *path) {
         current_mode  = MODE_VIEW_TEXT;
         return;
     }
-    fseek(f, 0, SEEK_END);
-    long fsz = ftell(f);
+    fseeko(f, 0, SEEK_END);
+    off_t fsz = ftello(f);       // 64-bit with _FILE_OFFSET_BITS=64 (correct on armhf)
     rewind(f);
+    if (fsz < 0) fsz = 0;        // non-seekable / ftello error
 
-    // Clamp to a sane limit — we're not a full editor for 500 MB logs
-    if (fsz > 1024 * 1024) fsz = 1024 * 1024; // 1 MB cap
+    // Clamp to a sane limit — we're not a full editor for 500 MB logs. Over the
+    // cap the file loads view-only so a save can never truncate it to the
+    // loaded prefix.
+    bool byte_capped = (fsz > TV_MAX_BYTES);
+    if (fsz > TV_MAX_BYTES) fsz = TV_MAX_BYTES;
     char *buf = malloc(fsz + 1);
     if (!buf) { fclose(f); tv.read_only = true; current_mode = MODE_VIEW_TEXT; return; }
     size_t got = fread(buf, 1, fsz, f);
     fclose(f);
     buf[got] = '\0';
 
-    tv_split_lines(buf, got);
+    tv_split_lines(buf, got);   // sets tv.truncated if the line cap was hit
     free(buf);
+    if (byte_capped) tv.truncated = true;
 
-    // Check write permission
-    tv.read_only = (access(path, W_OK) != 0);
+    // A file that didn't fully load is view-only — saving would drop the rest.
+    tv.read_only = tv.truncated || (access(path, W_OK) != 0);
 
-    vtree_log("[viewer] opened: %s  size=%ld bytes  lines=%d%s\n",
-              path, fsz, tv.line_count, tv.read_only ? "  [read-only]" : "");
+    vtree_log("[viewer] opened: %s  size=%lld bytes  lines=%d%s\n",
+              path, (long long)fsz, tv.line_count, tv.read_only ? "  [read-only]" : "");
 
     current_mode = MODE_VIEW_TEXT;
 }
@@ -494,8 +525,7 @@ void viewer_handle_button(SDL_GameControllerButton btn,
 
     if (btn == SDL_CONTROLLER_BUTTON_START) {
         if (tv.modified && !tv.read_only) {
-            tv_save();
-            tv.modified = false;
+            if (tv_save()) tv.modified = false;
         }
         return;
     }
@@ -601,7 +631,8 @@ void viewer_draw(void) {
     snprintf(title, sizeof(title), "%s%s%s",
              bname,
              tv.modified   ? tr("Viewer_Modified") : "",
-             tv.read_only  ? tr("Viewer_ReadOnly")  : "");
+             tv.truncated  ? tr("Viewer_TooLarge")
+                           : (tv.read_only ? tr("Viewer_ReadOnly") : ""));
     draw_txt(font_header, title, 6, (head_h - cfg.font_size_header) / 2, cfg.theme.text);
 
     // Line/total right-aligned

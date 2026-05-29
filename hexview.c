@@ -41,6 +41,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <fcntl.h>
 #include <errno.h>
 
 // ---------------------------------------------------------------------------
@@ -103,6 +104,7 @@ typedef struct {
     size_t         size;
     bool           modified;
     bool           read_only;
+    bool           windowed;     // file is larger than HV_MAX_SIZE; only the first window is loaded
 
     int            top_row;
     int            cursor;
@@ -236,7 +238,7 @@ static void hv_clamp_scroll(void) {
 void hexview_open(const char *path) {
     if (hv.data) { free(hv.data); hv.data = NULL; }
     memset(&hv, 0, sizeof(hv));
-    strncpy(hv.path, path, MAX_PATH - 1);
+    copy_str(hv.path, path, sizeof(hv.path));
     hv.mode     = HVM_READ;
     hv.top_row  = 0;
     hv.cursor   = 0;
@@ -248,9 +250,13 @@ void hexview_open(const char *path) {
         current_mode = MODE_VIEW_HEX;
         return;
     }
-    fseek(f, 0, SEEK_END);
-    long fsz = ftell(f);
+    fseeko(f, 0, SEEK_END);
+    off_t fsz = ftello(f);       // 64-bit with _FILE_OFFSET_BITS=64 (correct on armhf)
     rewind(f);
+    if (fsz < 0) fsz = 0;        // non-seekable / ftello error
+    // Files larger than the window are loaded as just the first HV_MAX_SIZE
+    // bytes. Saving is in place (pwrite), so the untouched tail is preserved.
+    hv.windowed = (fsz > HV_MAX_SIZE);
     if (fsz > HV_MAX_SIZE) fsz = HV_MAX_SIZE;
 
     hv.data = malloc(fsz + 1);
@@ -275,15 +281,39 @@ void hexview_close(void) {
 }
 
 static bool hv_save(void) {
-    FILE *f = fopen(hv.path, "wb");
-    if (!f) {
-        vtree_log("[hexview] save FAILED: %s (errno %d: %s)\n", hv.path, errno, strerror(errno));
+    if (!hv.data) return false;
+    // This editor only overwrites bytes; it never changes the file's length.
+    // So we patch the loaded window in place with pwrite and never touch bytes
+    // past hv.size. For files larger than the window this preserves the
+    // untouched tail (the old fopen("wb") truncated the file to the window),
+    // and it writes only the window — minimal IO regardless of total size.
+    int fd = open(hv.path, O_WRONLY);   // no O_TRUNC: keep everything past hv.size
+    if (fd < 0) {
+        vtree_log("[hexview] save FAILED (open): %s (errno %d: %s)\n", hv.path, errno, strerror(errno));
         return false;
     }
-    fwrite(hv.data, 1, hv.size, f);
-    fclose(f);
-    vtree_log("[hexview] saved: %s  (%zu bytes)\n", hv.path, hv.size);
-    return true;
+    size_t off = 0;
+    bool   ok  = true;
+    while (off < hv.size) {
+        ssize_t w = pwrite(fd, hv.data + off, hv.size - off, (off_t)off);
+        if (w < 0) {
+            if (errno == EINTR) continue;   // interrupted before any progress — retry
+            vtree_log("[hexview] save FAILED (pwrite): %s (errno %d: %s)\n", hv.path, errno, strerror(errno));
+            ok = false;
+            break;
+        }
+        off += (size_t)w;
+    }
+    if (ok && fsync(fd) != 0) {
+        vtree_log("[hexview] save FAILED (fsync): %s (errno %d: %s)\n", hv.path, errno, strerror(errno));
+        ok = false;
+    }
+    if (close(fd) != 0) {
+        vtree_log("[hexview] save FAILED (close): %s (errno %d: %s)\n", hv.path, errno, strerror(errno));
+        ok = false;
+    }
+    if (ok) vtree_log("[hexview] saved: %s  (%zu bytes, in place)\n", hv.path, hv.size);
+    return ok;
 }
 
 // ---------------------------------------------------------------------------
@@ -304,7 +334,7 @@ void hexview_handle_button(SDL_GameControllerButton btn,
             current_mode = MODE_EXPLORER; return;
         }
         if (btn == SDL_CONTROLLER_BUTTON_START) {
-            if (hv.modified && !hv.read_only) { hv_save(); hv.modified = false; } return;
+            if (hv.modified && !hv.read_only) { if (hv_save()) hv.modified = false; } return;
         }
         if (btn == cfg.k_confirm && !hv.read_only) {
             hv.mode = HVM_EDIT; hv.edit_buf = hv.data ? (int)hv.data[hv.cursor] : 0; return;
@@ -416,11 +446,12 @@ void hexview_draw(void) {
 
     const char *bname = strrchr(hv.path, '/');
     bname = bname ? bname + 1 : hv.path;
-    char fname_part[MAX_PATH + 16];
-    snprintf(fname_part, sizeof(fname_part), "%s%s%s",
+    char fname_part[MAX_PATH + 48];
+    snprintf(fname_part, sizeof(fname_part), "%s%s%s%s",
              bname,
              hv.modified  ? " [mod]" : "",
-             hv.read_only ? " [R/O]" : "");
+             hv.read_only ? " [R/O]" : "",
+             hv.windowed  ? " [first 16M]" : "");
     draw_txt(font_header, fname_part, 6, info_text_y, cfg.theme.text);
 
     if (hv.data && hv.size > 0 && hv.cursor < (int)hv.size) {

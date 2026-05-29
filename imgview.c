@@ -130,8 +130,7 @@ static void iv_scan_siblings(const char *dir, const char *current_name) {
     while ((e = readdir(d)) && iv.sibling_count < MAX_FILES) {
         if (e->d_name[0] == '.') continue;
         if (iv_is_image(e->d_name)) {
-            strncpy(iv.siblings[iv.sibling_count], e->d_name, 255);
-            iv.siblings[iv.sibling_count][255] = '\0';
+            copy_str(iv.siblings[iv.sibling_count], e->d_name, sizeof(iv.siblings[iv.sibling_count]));
             iv.sibling_count++;
         }
     }
@@ -177,7 +176,7 @@ static void iv_load(const char *path) {
 // ---------------------------------------------------------------------------
 void imgview_open(const char *path) {
     memset(&iv, 0, sizeof(iv));
-    strncpy(iv.path, path, MAX_PATH - 1);
+    copy_str(iv.path, path, sizeof(iv.path));
 
     // Split into dir + basename for sibling navigation
     const char *slash = strrchr(path, '/');
@@ -208,7 +207,7 @@ static void iv_nav_sibling(int delta) {
     iv.sibling_idx = (iv.sibling_idx + delta + iv.sibling_count) % iv.sibling_count;
     char new_path[MAX_PATH];
     join_path(new_path, iv.dir, iv.siblings[iv.sibling_idx]);
-    strncpy(iv.path, new_path, MAX_PATH - 1);
+    copy_str(iv.path, new_path, sizeof(iv.path));
     iv_load(new_path);   // resets zoom/pan via iv_reset_fit
 }
 

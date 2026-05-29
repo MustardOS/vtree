@@ -8,15 +8,30 @@
 #include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <stdint.h>
 #ifdef __linux__
 #  include <sys/syscall.h>
 #  ifdef SYS_copy_file_range
 #    define HAVE_CFR 1
-static ssize_t do_cfr(int in, off_t *off_in, int out, off_t *off_out, size_t len) {
+// The kernel's copy_file_range takes loff_t* offsets, which are always 64-bit.
+// Use int64_t (not off_t) so the pointed-to storage is 8 bytes regardless of
+// _FILE_OFFSET_BITS — otherwise a 32-bit build would hand the kernel a 4-byte
+// pointer and the offset write-back would clobber 4 adjacent bytes.
+static ssize_t do_cfr(int in, int64_t *off_in, int out, int64_t *off_out, size_t len) {
     return syscall(SYS_copy_file_range, in, off_in, out, off_out, len, 0);
 }
 #  endif
 #endif
+
+// Safe bounded string copy: always NUL-terminates dst and never overruns it.
+// Unlike strncpy, dst is left a valid C string even when src >= dst_size — the
+// source of several latent over-reads, so this is the project-wide replacement.
+void copy_str(char* dst, const char* src, size_t dst_size) {
+    if (dst_size == 0) return;
+    size_t n = strnlen(src, dst_size - 1);
+    memcpy(dst, src, n);
+    dst[n] = '\0';
+}
 
 char* trim(char* str) {
     char* end;
@@ -39,7 +54,7 @@ void join_path(char* out, const char* dir, const char* name) {
 void format_size(long long bytes, char* out) {
     if      (bytes < 1024)             snprintf(out, 16, "%lld B",   bytes);
     else if (bytes < 1024 * 1024)      snprintf(out, 16, "%.1f KB",  bytes / 1024.0);
-    else if (bytes < 1024 * 1024 * 1024) snprintf(out, 16, "%.1f MB", bytes / 1048576.0);
+    else if (bytes < 1024LL * 1024 * 1024) snprintf(out, 16, "%.1f MB", bytes / 1048576.0);
     else                               snprintf(out, 16, "%.1f GB",  bytes / 1073741824.0);
 }
 
@@ -68,7 +83,7 @@ void load_dir(int p_idx, const char* path) {
     s->files = buf;
     s->file_capacity = cap;
 
-    strncpy(s->current_path, path, MAX_PATH);
+    copy_str(s->current_path, path, MAX_PATH);
     s->file_count = 0; s->selected_index = 0; s->scroll_offset = 0;
 
     if (strcmp(path, "/") != 0) {
@@ -100,7 +115,7 @@ void load_dir(int p_idx, const char* path) {
             bool link = S_ISLNK(lst.st_mode);
             struct stat *info = &lst;
             if (link && stat(full, &st) == 0) info = &st;
-            strncpy(s->files[s->file_count].name, e->d_name, 255);
+            copy_str(s->files[s->file_count].name, e->d_name, sizeof(s->files[s->file_count].name));
             s->files[s->file_count].is_dir  = S_ISDIR(info->st_mode);
             s->files[s->file_count].is_link = link;
             s->files[s->file_count].size    = (long long)info->st_size;
@@ -127,7 +142,7 @@ static int copy_file_data(FILE *src, FILE *dst, off_t file_size) {
 
 #ifdef HAVE_CFR
     if (file_size > 0) {
-        off_t off_in = 0, off_out = 0;
+        int64_t off_in = 0, off_out = 0;   // 64-bit to match the kernel's loff_t*
         // Probe support with first chunk
         size_t chunk = (size_t)(file_size < COPY_CHUNK ? file_size : COPY_CHUNK);
         ssize_t r = do_cfr(fileno(src), &off_in, fileno(dst), &off_out, chunk);
@@ -277,8 +292,7 @@ static int copy_path_r(const char *src, const char *dest,
             snprintf(paste_prog_name, MAX_PATH, "%s/%s", root_bn, src + root_len + 1);
         } else {
             const char *bn = strrchr(src, '/');
-            strncpy(paste_prog_name, bn ? bn + 1 : src, MAX_PATH - 1);
-            paste_prog_name[MAX_PATH - 1] = '\0';
+            copy_str(paste_prog_name, bn ? bn + 1 : src, MAX_PATH);
         }
     }
 
@@ -295,7 +309,11 @@ static int copy_path_r(const char *src, const char *dest,
         return -1;
     }
     struct stat src_stat;
-    fstat(fileno(fs), &src_stat);
+    if (fstat(fileno(fs), &src_stat) != 0) {
+        vtree_log("[copy] fstat FAILED: %s (errno %d: %s)\n", src, errno, strerror(errno));
+        fclose(fs);
+        return -1;
+    }
 
     FILE *fd = fopen(tmp, "wb");
     if (!fd) {

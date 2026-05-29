@@ -14,6 +14,11 @@ typedef struct { char key[MAX_LANG_KEY_LEN]; char val[MAX_LANG_VAL_LEN]; } LangE
 static LangEntry lang_table[MAX_LANG_KEYS];
 static int       lang_entry_count = 0;
 
+// English reference table — the trusted baseline used to validate the
+// printf-specifier signatures of whatever language is active.
+static LangEntry lang_baseline[MAX_LANG_KEYS];
+static int       lang_baseline_count = 0;
+
 // ---------------------------------------------------------------------------
 // Build the path to the lang/ directory next to the executable.
 // ---------------------------------------------------------------------------
@@ -36,8 +41,8 @@ static void get_lang_dir(char *out) {
 // Parse one language INI file into the flat lookup table.
 // Sections are ignored — all keys are merged into one flat namespace.
 // ---------------------------------------------------------------------------
-static void lang_load_file_path(const char *path) {
-    lang_entry_count = 0;
+static void load_ini_into(const char *path, LangEntry *tbl, int *cnt) {
+    *cnt = 0;
     FILE *f = fopen(path, "r");
     if (!f) return;
 
@@ -63,14 +68,109 @@ static void lang_load_file_path(const char *path) {
         char *v = eq + 1;
         while (*v == ' ' || *v == '\t') v++;
 
-        if (lang_entry_count >= MAX_LANG_KEYS) break;
-        strncpy(lang_table[lang_entry_count].key, t,  MAX_LANG_KEY_LEN - 1);
-        lang_table[lang_entry_count].key[MAX_LANG_KEY_LEN - 1] = '\0';
-        strncpy(lang_table[lang_entry_count].val, v,  MAX_LANG_VAL_LEN - 1);
-        lang_table[lang_entry_count].val[MAX_LANG_VAL_LEN - 1] = '\0';
-        lang_entry_count++;
+        if (*cnt >= MAX_LANG_KEYS) break;
+        copy_str(tbl[*cnt].key, t, MAX_LANG_KEY_LEN);
+        copy_str(tbl[*cnt].val, v, MAX_LANG_VAL_LEN);
+        (*cnt)++;
     }
     fclose(f);
+}
+
+// ---------------------------------------------------------------------------
+// Format-string safety. Translations are user-supplied files yet are used as
+// printf formats at 60+ call sites, so a stray %n (writes through a pointer
+// arg) or a wrong specifier count/type (varargs over-read → crash / info leak)
+// would be undefined behaviour. We defend once at load time, leaving the hot
+// tr() path and every call site untouched.
+//
+// fmt_signature() rejects the constructs that are never valid in an untrusted
+// format — %n, and '*' dynamic width/precision (consumes an extra arg) — and
+// otherwise fills 'out' with a compact signature of the argument types a format
+// consumes: one token per conversion (length-modifier + conversion letter),
+// '%%' consuming nothing. Harmless flags/width/precision are ignored since they
+// don't change which argument is read. Equal signatures ⇒ identical arg lists.
+// ---------------------------------------------------------------------------
+static bool fmt_signature(const char *s, char *out, size_t outcap) {
+    size_t o = 0;
+    out[0] = '\0';
+    for (const char *p = s; *p; p++) {
+        if (*p != '%') continue;
+        p++;
+        if (*p == '%') continue;                      // literal %%
+        if (*p == '\0') return false;                 // trailing '%'
+        while (*p && strchr("-+ 0#", *p)) p++;         // flags
+        if (*p == '*') return false;                  // dynamic width → extra arg
+        while (*p >= '0' && *p <= '9') p++;            // width
+        if (*p == '.') {                              // precision
+            p++;
+            if (*p == '*') return false;
+            while (*p >= '0' && *p <= '9') p++;
+        }
+        char lenmod[3] = {0}; int li = 0;             // length modifier (h/l/ll/…)
+        while (*p && strchr("hljztL", *p) && li < 2) lenmod[li++] = *p++;
+        char conv = *p;
+        if (conv == '\0' || conv == 'n')           return false;   // %n never allowed
+        if (!strchr("diouxXeEfFgGaAcs", conv))     return false;   // unknown conversion
+        char tok[8];
+        int tl = snprintf(tok, sizeof(tok), "%s%c|", lenmod, conv);
+        if (tl < 0 || o + (size_t)tl >= outcap)    return false;   // too many specifiers
+        memcpy(out + o, tok, (size_t)tl);
+        o += (size_t)tl; out[o] = '\0';
+    }
+    return true;
+}
+
+// Load English once as the trusted reference (README lists English.ini as the
+// required default). Validation degrades gracefully if it is missing.
+static void ensure_baseline(void) {
+    if (lang_baseline_count > 0) return;
+    char dir[MAX_PATH]; get_lang_dir(dir);
+    char path[MAX_PATH];
+    snprintf(path, MAX_PATH, "%s/English.ini", dir);
+    load_ini_into(path, lang_baseline, &lang_baseline_count);
+}
+
+// Validate every loaded translation against the English baseline. A value is
+// kept only if it is safe and its specifier signature matches English's for the
+// same key; otherwise fall back to the English text, or — if even that is
+// missing/unsafe — to the key name. Both fallbacks are literal-safe to format.
+static void sanitize_against_baseline(void) {
+    for (int i = 0; i < lang_entry_count; i++) {
+        char sig_a[128];
+        bool ok_a = fmt_signature(lang_table[i].val, sig_a, sizeof(sig_a));
+
+        const char *base_val = NULL;
+        char sig_b[128]; bool ok_b = false;
+        for (int j = 0; j < lang_baseline_count; j++) {
+            if (strcmp(lang_baseline[j].key, lang_table[i].key) == 0) {
+                base_val = lang_baseline[j].val;
+                ok_b = fmt_signature(base_val, sig_b, sizeof(sig_b));
+                break;
+            }
+        }
+
+        if (base_val) {
+            if (ok_a && ok_b && strcmp(sig_a, sig_b) == 0) continue;   // matches English
+            const char *repl = ok_b ? base_val : lang_table[i].key;
+            vtree_log("[lang] '%s': format mismatch/unsafe — falling back to %s\n",
+                      lang_table[i].key, ok_b ? "English" : "key");
+            snprintf(lang_table[i].val, MAX_LANG_VAL_LEN, "%s", repl);
+        } else if (!ok_a) {
+            // No English reference for this key and the value is unsafe — neuter.
+            vtree_log("[lang] '%s': unsafe, no baseline — using key\n", lang_table[i].key);
+            snprintf(lang_table[i].val, MAX_LANG_VAL_LEN, "%s", lang_table[i].key);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Parse one language INI file into the active table, then sanitize it against
+// the English baseline so no untrusted format string reaches a printf call.
+// ---------------------------------------------------------------------------
+static void lang_load_file_path(const char *path) {
+    ensure_baseline();
+    load_ini_into(path, lang_table, &lang_entry_count);
+    sanitize_against_baseline();
 }
 
 // ---------------------------------------------------------------------------
@@ -97,7 +197,7 @@ static void scan_lang_files(void) {
         // Strip .ini extension for display name
         int nlen = (int)(nl - 4);
         if (nlen <= 0 || nlen >= MAX_LANG_NAME) continue;
-        strncpy(lang_names[lang_file_count], n, nlen);
+        memcpy(lang_names[lang_file_count], n, nlen);   // copy basename without ".ini"
         lang_names[lang_file_count][nlen] = '\0';
         lang_file_count++;
     }
